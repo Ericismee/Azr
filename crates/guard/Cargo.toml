@@ -1,0 +1,17 @@
+﻿[package]
+name = "azr-guard"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "azr-guard"
+path = "src/main.rs"
+
+[dependencies]
+azr-core.workspace = true
+azr-platform.workspace = true
+
+[dependencies.windows]
+workspace = true
+features = ["Win32_Foundation", "Win32_System_Threading"]

@@ -1,0 +1,18 @@
+name: Windows build
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Tests
+        run: cargo test --locked --workspace
+      - name: Release
+        shell: pwsh
+        run: ./build.ps1 -SkipTests
