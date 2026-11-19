@@ -177,8 +177,14 @@ fn month_label(m: u32) -> String {
 }
 
 fn weekday_label(wd: u32) -> String {
-    const ID: [&str; 7] = [
-        "Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu",
+    const VI: [&str; 7] = [
+        "Chủ nhật",
+        "Thứ hai",
+        "Thứ ba",
+        "Thứ tư",
+        "Thứ năm",
+        "Thứ sáu",
+        "Thứ bảy",
     ];
     const EN: [&str; 7] = [
         "Sunday",
@@ -192,7 +198,7 @@ fn weekday_label(wd: u32) -> String {
     if en() {
         EN[(wd % 7) as usize]
     } else {
-        ID[(wd % 7) as usize]
+        VI[(wd % 7) as usize]
     }
     .to_string()
 }

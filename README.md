@@ -29,6 +29,38 @@ The glass and corner effects are Azr's Windows implementation. Rendering depends
 
 <p align="center"><img src="docs/assets/appearance-en.png" width="720" alt="Azr appearance settings in English"></p>
 
+## Download and screenshots
+
+[Download Azr 0.1.1 for Windows x64](https://github.com/Ericismee/Azr/releases/tag/v0.1.1). Extract `Azr-0.1.1-windows-x64-portable.zip` and run `azr.exe`. This is a portable package, not an installer. Checksums are in `SHA256SUMS.txt`. EXEs are not Authenticode-signed.
+
+<details>
+<summary>English / Vietnamese desktop, glass controls, widgets</summary>
+
+![English desktop](docs/assets/desktop-user-en.png)
+![Vietnamese desktop](docs/assets/desktop-user-vi.png)
+![Glass controls](docs/assets/control-center-user.png)
+![Widgets](docs/assets/widgets-user.png)
+
+User-supplied Windows Sandbox captures. The widget image predates the 0.1.1 correction of Vietnamese weekday names. Appearance varies with wallpaper, settings, and rendering support.
+</details>
+
+![Task Manager](docs/assets/process-memory.png)
+
+## Resource use
+
+The supplied Task Manager snapshot shows `azr` using **6.6 MB** in the Memory column and **0.1% CPU**, and `azr-guard` using **0.6 MB** and **0% CPU**: approximately **7.2 MB combined at that moment**. Disk activity is 0.1 MB/s and 0 MB/s respectively; both network readings are 0 Mbps.
+
+This is one observation, not a benchmark, maximum, or fixed RAM requirement. The cropped image does not establish the exact memory counter, sampling duration, or VM allocation. It does not represent total committed memory or GPU/DWM memory. Usage varies with animation, artwork, widgets, caches, Windows, hardware, and enabled features. ZIP size, extracted file size, and runtime RAM are different measurements.
+
+`azr.exe` manages and draws the UI. `azr-guard.exe` is the taskbar recovery companion used with taskbar takeover. Normal exit restores the taskbar; the guard supports recovery after an unexpected stop.
+
+## Files and Windows integration
+
+- Portable folder: `Azr-0.1.1`; binaries: `azr.exe`, `azr-guard.exe`. Keep `fonts` and `brand` beside them.
+- Configuration: `%APPDATA%\Azr`, or `AZR_CONFIG_DIR`; descriptive files include `settings.cfg`, `pins.txt`, `Azr.log`, and `Azr-guard.log`.
+- Optional startup: the `Azr` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, disabled by default. Runtime synchronization names start with `Local\Azr`.
+- No system-wide installer, Windows service, or driver is added. To remove: disable autostart, exit Azr, and delete the extracted folder. Delete `%APPDATA%\Azr` separately only to erase settings. Third-party fonts and dependencies retain their own identities and licenses.
+
 ## Build and run
 
 Requirements: Windows 11 x64, stable Rust, Visual Studio C++ x64 Build Tools, and the Windows SDK.
@@ -36,7 +68,7 @@ Requirements: Windows 11 x64, stable Rust, Visual Studio C++ x64 Build Tools, an
 ```powershell
 git clone https://github.com/Ericismee/Azr.git
 cd Azr
-.build.ps1
+.\build.ps1
 ```
 
 The script runs the locked workspace tests, builds release binaries, and creates a portable ZIP with SHA-256 hashes in `dist`. It does not launch or install the app. Extract the package and open `azr.exe`; keep `azr-guard.exe`, `fonts`, and `brand` alongside it. Normal use does not require administrator privileges. Exit through the app menu or notification area.

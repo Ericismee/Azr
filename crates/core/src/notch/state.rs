@@ -198,17 +198,17 @@ pub fn shadow(l: Look) -> (f32, f32, f32) {
 pub mod motion {
     pub const DWELL_MS: u32 = 300;
     pub const PEEK_RATIO: f32 = 0.9;
-    pub const PEEK_PERIOD_MS: u32 = 34;
-    pub const OPEN_RATIO: f32 = 0.78;
-    pub const OPEN_PERIOD_MS: u32 = 68;
+    pub const PEEK_PERIOD_MS: u32 = 120;
+    pub const OPEN_RATIO: f32 = 0.86;
+    pub const OPEN_PERIOD_MS: u32 = 180;
     pub const CLOSE_RATIO: f32 = 1.0;
-    pub const CLOSE_PERIOD_MS: u32 = 45;
-    pub const SWAP_RATIO: f32 = 0.84;
-    pub const SWAP_PERIOD_MS: u32 = 55;
+    pub const CLOSE_PERIOD_MS: u32 = 145;
+    pub const SWAP_RATIO: f32 = 0.9;
+    pub const SWAP_PERIOD_MS: u32 = 160;
     pub const CONTENT_DELAY_MS: u32 = 60;
-    pub const CONTENT_FADE_MS: u32 = 170;
-    pub const CONTENT_SCALE_FROM: f32 = 0.96;
-    pub const CONTENT_RISE_DP: f32 = 6.0;
+    pub const CONTENT_FADE_MS: u32 = 210;
+    pub const CONTENT_SCALE_FROM: f32 = 0.98;
+    pub const CONTENT_RISE_DP: f32 = 4.0;
     pub const CLOSE_FADE_MS: u32 = 90;
     pub const SWAP_FADE_MS: u32 = 120;
     pub const LYRIC_SWAP_MS: u32 = 220;

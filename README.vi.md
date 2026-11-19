@@ -29,6 +29,38 @@ Hiệu ứng kính và góc bo được Azr dựng trên Windows. Kết quả ph
 
 <p align="center"><img src="docs/assets/appearance-vi.png" width="720" alt="Cài đặt giao diện Azr bằng tiếng Việt"></p>
 
+## Tải bản phát hành và ảnh giao diện
+
+[Tải Azr 0.1.1 cho Windows x64](https://github.com/Ericismee/Azr/releases/tag/v0.1.1). Giải nén `Azr-0.1.1-windows-x64-portable.zip` rồi chạy `azr.exe`. Đây là bản portable, không phải trình cài đặt. Mã kiểm tra tệp có trong `SHA256SUMS.txt`. EXE chưa được ký Authenticode.
+
+<details>
+<summary>Màn hình Anh / Việt, bảng điều khiển kính và widget</summary>
+
+![English desktop](docs/assets/desktop-user-en.png)
+![Vietnamese desktop](docs/assets/desktop-user-vi.png)
+![Glass controls](docs/assets/control-center-user.png)
+![Widgets](docs/assets/widgets-user.png)
+
+Ảnh người dùng cung cấp, chụp trong Windows Sandbox. Ảnh widget có trước bản 0.1.1 sửa tên thứ sang tiếng Việt. Hình thức phụ thuộc hình nền, thiết lập và khả năng dựng hình.
+</details>
+
+![Task Manager](docs/assets/process-memory.png)
+
+## Tài nguyên sử dụng
+
+Ảnh Task Manager cho thấy `azr` dùng **6,6 MB** ở cột bộ nhớ và **0,1% CPU**; `azr-guard` dùng **0,6 MB** và **0% CPU**: tổng khoảng **7,2 MB tại thời điểm chụp**. Hoạt động ổ đĩa lần lượt 0,1 MB/s và 0 MB/s; mạng đều 0 Mbps.
+
+Đây là một lần quan sát, không phải benchmark, mức tối đa hay yêu cầu RAM cố định. Ảnh cắt không xác định chính xác bộ đếm bộ nhớ, thời gian lấy mẫu hoặc tài nguyên máy ảo. Số này không đại diện toàn bộ bộ nhớ cam kết hay bộ nhớ GPU/DWM. Tài nguyên thay đổi theo hiệu ứng, ảnh bìa, widget, bộ đệm, Windows, phần cứng và tính năng bật. Dung lượng ZIP, dung lượng giải nén và RAM khi chạy là các số đo khác nhau.
+
+`azr.exe` quản lý và vẽ giao diện. `azr-guard.exe` hỗ trợ khôi phục thanh tác vụ khi bật chế độ thay thế thanh tác vụ. Thoát bình thường sẽ khôi phục thanh tác vụ; guard hỗ trợ trường hợp ứng dụng dừng bất thường.
+
+## Tệp và tích hợp Windows
+
+- Thư mục portable: `Azr-0.1.1`; chương trình: `azr.exe`, `azr-guard.exe`. Giữ `fonts` và `brand` cạnh EXE.
+- Cấu hình: `%APPDATA%\Azr`, hoặc `AZR_CONFIG_DIR`; các tệp mô tả gồm `settings.cfg`, `pins.txt`, `Azr.log`, `Azr-guard.log`.
+- Tự khởi động tùy chọn: giá trị `Azr` tại `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, mặc định tắt. Tên đối tượng đồng bộ tiến trình bắt đầu bằng `Local\Azr`.
+- Không thêm trình cài toàn hệ thống, dịch vụ hay driver Windows. Muốn gỡ: tắt tự khởi động, thoát Azr rồi xóa thư mục giải nén. Chỉ xóa riêng `%APPDATA%\Azr` nếu muốn bỏ cấu hình. Font và thư viện bên thứ ba giữ tên, giấy phép riêng.
+
 ## Build và chạy
 
 Cần Windows 11 x64, Rust stable, Visual Studio Build Tools có công cụ C++ x64 và Windows SDK.

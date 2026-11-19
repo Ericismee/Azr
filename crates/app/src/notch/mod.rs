@@ -809,6 +809,10 @@ impl Notch {
     fn rotate_glance(&mut self) {
         let n = self.glance_items().len();
         self.glance_idx = glance::next(self.glance_idx, n);
+        if !crate::prefs::get().anim {
+            self.render();
+            return;
+        }
         self.retire_content(120);
         let rise = 6.0 * self.dpi;
         if let Ok(g) = self.body.ghost.cast::<CompositionObject>() {
@@ -873,8 +877,30 @@ impl Notch {
         if !matches!(new.view, View::Open(_)) {
             self.cal_sel = 0;
         }
-        let springy = (!first).then(|| Self::springs(old, new));
-        if view_changed && !first {
+        let animate = crate::prefs::get().anim;
+        let springy = (!first && animate).then(|| Self::springs(old, new));
+        if !animate {
+            if let Ok(c) = self.body.content.cast::<CompositionObject>() {
+                for prop in ["Opacity", "Scale.X", "Scale.Y", "Offset.Y"] {
+                    let _ = c.StopAnimation(&HSTRING::from(prop));
+                }
+            }
+            let _ = self.body.content.SetOpacity(1.0);
+            let _ = self.body.content.SetScale(Vector3 {
+                X: 1.0,
+                Y: 1.0,
+                Z: 1.0,
+            });
+            let _ = self.body.content.SetOffset(Vector3 {
+                X: 0.0,
+                Y: 0.0,
+                Z: 0.0,
+            });
+            if let Ok(kids) = self.body.ghost.Children() {
+                let _ = kids.RemoveAll();
+            }
+        }
+        if view_changed && !first && animate {
             let closing = matches!(old.view, View::Open(_) | View::Drop)
                 && !matches!(new.view, View::Open(_) | View::Drop);
             self.retire_content(if closing {
@@ -886,7 +912,7 @@ impl Notch {
         self.apply_size(springy);
         self.render();
         self.sync_glance();
-        if view_changed && !first {
+        if view_changed && !first && animate {
             self.intro(
                 matches!(new.view, View::Open(_) | View::Drop)
                     && !matches!(old.view, View::Open(_) | View::Drop),
