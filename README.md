@@ -36,7 +36,7 @@ Requirements: Windows 11 x64, stable Rust, Visual Studio C++ x64 Build Tools, an
 ```powershell
 git clone https://github.com/Ericismee/Azr.git
 cd Azr
-.uild.ps1
+.build.ps1
 ```
 
 The script runs the locked workspace tests, builds release binaries, and creates a portable ZIP with SHA-256 hashes in `dist`. It does not launch or install the app. Extract the package and open `azr.exe`; keep `azr-guard.exe`, `fonts`, and `brand` alongside it. Normal use does not require administrator privileges. Exit through the app menu or notification area.
