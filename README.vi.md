@@ -73,3 +73,11 @@ Bạn có thể báo lỗi hoặc đề xuất tính năng tại [Issues](https:
 [PolyForm Noncommercial 1.0.0](LICENSE.md) · [Thành phần bên thứ ba](legal/THIRD-PARTY-LICENSES.md)
 
 Azr là dự án độc lập dành cho Windows, không liên kết với Apple hay Microsoft. Hiệu ứng kính được triển khai riêng trên Windows.
+
+## Donate · Buy Me a Coffee
+
+Nếu bạn thấy Azr hữu ích và muốn ủng hộ dự án, hãy quét mã QR bên dưới. Cảm ơn bạn đã đồng hành cùng Azr.
+
+<p align="center">
+  <img src="docs/assets/donate-qr.png" width="230" alt="Donation QR code">
+</p>

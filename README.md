@@ -72,3 +72,11 @@ Report bugs or suggest features through [Issues](https://github.com/Ericismee/Az
 [PolyForm Noncommercial 1.0.0](LICENSE.md) · [Third-party components](legal/THIRD-PARTY-LICENSES.md)
 
 Azr is an independent Windows project, not affiliated with Apple or Microsoft. Its glass effects are implemented for Windows.
+
+## Donate · Buy Me a Coffee
+
+If you enjoy using Azr and would like to support the project, you can scan the QR code below. Thank you for your support.
+
+<p align="center">
+  <img src="docs/assets/donate-qr.png" width="230" alt="Donation QR code">
+</p>
