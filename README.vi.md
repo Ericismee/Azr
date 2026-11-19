@@ -1,5 +1,5 @@
 <div align="center">
-<img src="assets/brand/azr-liquid-glass.png" width="144" alt="Azr glass ribbon logo">
+<img src="docs/assets/readme-logo.png" width="144" alt="Azr glass ribbon logo">
 <h1>Azr</h1>
 <p>Tùy biến giao diện Windows 11.</p>
 
@@ -76,5 +76,5 @@ Bạn có thể báo lỗi hoặc đề xuất tính năng tại [Issues](https:
 Azr là dự án độc lập dành cho Windows, không liên kết với Apple hay Microsoft. Hiệu ứng kính được triển khai riêng trên Windows.
 
 <p align="center">
-  <a href="https://azr-support.colorfulacorn8.chatgpt.site"><img src="docs/assets/buy-me-a-coffee.svg" width="280" alt="Buy me a coffee — Support Azr"></a>
+  <a href="https://ericismee.github.io/Azr/"><img src="docs/assets/buy-me-a-coffee.svg" width="280" alt="Buy me a coffee — Support Azr"></a>
 </p>

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#e6eaff">
+<meta name="description" content="Support Azr with a one-time VietQR transfer. Choose an amount and generate a QR code for VIB.">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://img.vietqr.io data:; font-src 'self'; connect-src 'self' https://open.er-api.com; base-uri 'none'; form-action 'none'">
+<title>Ủng hộ Azr</title>
+<link rel="icon" type="image/png" href="assets/azr-logo.png"><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="ambient" aria-hidden="true"><div class="orb orb-one"></div><div class="orb orb-two"></div><div class="ribbon"></div></div>
+<header class="topbar"><a class="brand" href="https://github.com/Ericismee/Azr"><img src="assets/azr-logo.png" alt="" width="36" height="36"><span>Azr</span><span class="brand-detail" data-i18n="support">Ủng hộ dự án</span></a><button id="language" class="language" type="button" aria-label="Switch language">English</button></header>
+<main>
+<section class="intro" aria-labelledby="heading">
+<div class="logo-stage" aria-hidden="true"><div class="glass-halo"></div><img src="assets/azr-logo.png" width="240" height="240" alt=""></div>
+<h1 id="heading" data-i18n="heading">Tiếp sức cho Azr.</h1>
+<p class="lead" data-i18n="lead">Nếu Azr hữu ích với bạn, một ly cà phê là cách đơn giản để ủng hộ dự án.</p>
+<p class="quiet" data-i18n="voluntary">Hoàn toàn tự nguyện. Không đăng ký định kỳ.</p>
+<a class="repo-link" href="https://github.com/Ericismee/Azr" data-i18n="repo">Tìm hiểu về Azr trên GitHub</a>
+</section>
+<section class="glass-card" aria-labelledby="form-title">
+<div class="card-heading"><span class="coffee" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 8h12v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8Z M16 9h2a3 3 0 1 1 0 6h-2 M7 3v2 M11 2v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><h2 id="form-title">Buy me a coffee</h2><p data-i18n="oneTime">Ủng hộ một lần qua VietQR</p></div></div>
+<form id="donate-form" novalidate>
+<label class="field-label" for="currency" data-i18n="currency">Đơn vị hiển thị</label>
+<div class="select-wrap"><select id="currency"><option value="VND" data-i18n="vndOption">Việt Nam · VND</option><option value="USD" data-i18n="usdOption">Quốc tế · USD tham chiếu</option></select></div>
+<fieldset><legend data-i18n="choose">Chọn mức ủng hộ</legend><div id="presets" class="presets"></div></fieldset>
+<label class="field-label" for="custom-amount" data-i18n="custom">Hoặc nhập số tiền khác</label>
+<div class="amount-input"><input id="custom-amount" type="text" inputmode="numeric" autocomplete="off" maxlength="18" placeholder="Ví dụ: 40000" aria-describedby="minimum amount-error"><span id="input-unit">VND</span></div>
+<p id="minimum" class="hint"></p>
+<div class="summary"><span data-i18n="transfer">Số tiền chuyển khoản</span><strong id="transfer-amount">25.000 ₫</strong></div>
+<p id="usd-note" class="currency-note" hidden></p>
+<div id="fx-meta" class="fx-meta" hidden><span id="fx-status" role="status"></span> <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener noreferrer">ExchangeRate-API</a><button id="retry-rate" type="button" data-i18n="retry" hidden>Thử lại</button></div>
+<p id="amount-error" class="error" aria-live="polite"></p>
+<button id="generate" class="primary" type="submit" data-i18n="generate">Tạo mã VietQR</button>
+<p class="payment-note" data-i18n="bankNote">VietQR nhận VND qua ứng dụng ngân hàng hỗ trợ. Không phải cổng thanh toán thẻ hoặc nhận USD quốc tế.</p>
+</form>
+<dialog id="qr-panel" class="qr-panel" aria-labelledby="qr-heading">
+<button id="close-qr" class="close-modal" type="button" aria-label="Đóng" autofocus>×</button>
+<h2 id="qr-heading" data-i18n="thanks">Cảm ơn bạn đã tiếp sức cho Azr.</h2><p class="modal-intro" data-i18n="scanHint">Quét mã bằng ứng dụng ngân hàng để gửi lời ủng hộ của bạn.</p>
+<div class="qr-title" hidden><h3 data-i18n="scan">Quét mã để chuyển khoản</h3><span id="qr-status" aria-live="polite"></span></div>
+<p id="qr-error" class="error" role="alert"></p><div class="qr-frame"><img id="qr-image" alt="VietQR VIB 862565367" width="280" height="280" referrerpolicy="no-referrer"></div>
+<p class="qr-amount" id="qr-amount"></p>
+<div class="qr-links"><a id="open-qr" hidden target="_blank" rel="noopener noreferrer" data-i18n="openQr">Mở ảnh QR</a><button id="retry-qr" type="button" data-i18n="retry" hidden>Thử tải lại</button></div>
+<p class="verify-note" data-i18n="verify">Kiểm tra tên người nhận và số tiền trong ứng dụng ngân hàng trước khi xác nhận. Trang này không tự xác nhận giao dịch thành công.</p>
+</dialog>
+</section>
+</main>
+<footer><span>Azr</span><p data-i18n="footer">Cảm ơn bạn đã dành sự quan tâm cho dự án.</p><a href="https://github.com/Ericismee/Azr" data-i18n="back">Về GitHub</a></footer>
+<script type="module" src="app.js"></script>
+</body></html>

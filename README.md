@@ -1,5 +1,5 @@
 <div align="center">
-<img src="assets/brand/azr-liquid-glass.png" width="144" alt="Azr glass ribbon logo">
+<img src="docs/assets/readme-logo.png" width="144" alt="Azr glass ribbon logo">
 <h1>Azr</h1>
 <p>Desktop customization for Windows 11.</p>
 
@@ -75,5 +75,5 @@ Report bugs or suggest features through [Issues](https://github.com/Ericismee/Az
 Azr is an independent Windows project, not affiliated with Apple or Microsoft. Its glass effects are implemented for Windows.
 
 <p align="center">
-  <a href="https://azr-support.colorfulacorn8.chatgpt.site"><img src="docs/assets/buy-me-a-coffee.svg" width="280" alt="Buy me a coffee — Support Azr"></a>
+  <a href="https://ericismee.github.io/Azr/"><img src="docs/assets/buy-me-a-coffee.svg" width="280" alt="Buy me a coffee — Support Azr"></a>
 </p>
