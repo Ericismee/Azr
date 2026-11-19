@@ -1,7 +1,7 @@
 <div align="center">
 <img src="assets/brand/azr-liquid-glass.png" width="144" alt="Azr glass ribbon logo">
 <h1>Azr</h1>
-<p>A personal desktop, shaped around you.</p>
+<p>Một góc Windows, mang dấu ấn của bạn.</p>
 
 [English](README.md) · [Tiếng Việt](README.vi.md)
 
@@ -12,99 +12,84 @@
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-64748b)](LICENSE.md)
 </div>
 
-Azr là ứng dụng tùy biến màn hình nền Windows 11, viết bằng Rust. Dock phóng to, thanh menu, bảng điều khiển nổi và biểu tượng bo liên tục được kết hợp trong giao diện lấy cảm hứng từ kính. Hỗ trợ tiếng Việt và tiếng Anh.
+Mỗi lần mở máy là một lần trở về không gian của bạn. Hãy làm cho nơi ấy đáng mong chờ hơn một chút.
 
-![Màn hình nền sau khi tùy biến bằng Azr](docs/assets/desktop.png)
+**Azr mang cảm hứng macOS đến Windows 11** qua Dock kính, Island linh hoạt, thanh menu và các bảng điều khiển đồng điệu. Vẫn là những ứng dụng quen thuộc, nhưng màn hình nền có thêm nét riêng của bạn.
 
-## Tùy biến theo cách của bạn
+**[Tải Azr](https://github.com/Ericismee/Azr/releases/latest)** · [Ngắm giao diện](#nhìn-gần-hơn) · [English](README.md)
 
-- **Dock:** lối tắt ứng dụng, hiệu ứng phóng to, Launchpad, Tải xuống và Thùng rác.
-- **Chất liệu:** kính, kính mờ, trong suốt hoặc đặc; chỉnh riêng độ đục và độ mờ.
-- **Biểu tượng:** bật hoặc tắt nền, điều chỉnh góc bo liên tục và kiểu màu.
-- **Không gian làm việc:** thanh menu, điều khiển nhanh, góc nóng, công cụ cửa sổ và tiện ích.
-- **Logo:** chọn biểu tượng Azr, vòng tròn hoặc tải ảnh của bạn lên.
-- **Hiển thị:** hai ngôn ngữ, nhãn tự xuống dòng và bố cục cài đặt thích ứng.
+![Màn hình nền Azr](docs/assets/desktop-user-vi.png)
 
-Hiệu ứng kính và góc bo được Azr dựng trên Windows. Kết quả phụ thuộc thiết lập trong suốt, phần cứng, chế độ tiết kiệm pin và phiên làm việc từ xa.
+## Bớt tìm kiếm. Thêm liền mạch.
 
-<p align="center"><img src="docs/assets/appearance-vi.png" width="720" alt="Cài đặt giao diện Azr bằng tiếng Việt"></p>
+### Những ứng dụng quen, ngay trong tầm tay
 
-## Tải bản phát hành và ảnh giao diện
+Một chiếc Dock dành cho những thứ bạn mở mỗi ngày. Chuyển ứng dụng, mở Launchpad, ghé thư mục Tải xuống—mọi thứ có một chỗ dễ tìm. Hiệu ứng phóng to và biểu tượng bo mềm khiến những thao tác nhỏ cũng có cảm giác dễ chịu hơn.
 
-[Tải Azr 0.1.1 cho Windows x64](https://github.com/Ericismee/Azr/releases/tag/v0.1.1). Giải nén `Azr-0.1.1-windows-x64-portable.zip` rồi chạy `azr.exe`. Đây là bản portable, không phải trình cài đặt. Mã kiểm tra tệp có trong `SHA256SUMS.txt`. EXE chưa được ký Authenticode.
+### Một Island nhỏ, nhiều điều để mở ra
+
+Đồng hồ, âm nhạc, hẹn giờ và một chỗ để giữ tệp, gói trong một vùng nhỏ trên màn hình. Khi cần, Island mở rộng để bạn tương tác; khi xong, nó lại thu gọn, nhường không gian cho việc đang làm.
+
+### Điều khiển nhanh, theo cách của bạn
+
+Thanh menu ở phía trên, những điều khiển thường dùng chỉ cách một lần nhấn. Gom âm thanh, hiển thị và kết nối về cùng một nơi, rồi sắp xếp bảng điều khiển theo thói quen của mình.
+
+### Nhìn lướt là biết
+
+Đồng hồ, lịch, pin và thông tin hệ thống có vị trí riêng trên màn hình nền. Các widget giữ những điều hữu ích trong tầm mắt, để bạn không phải rời việc đang làm chỉ để kiểm tra một chi tiết nhỏ.
+
+### Thêm khoảng trống cho sự tập trung
+
+Tìm ứng dụng nhanh hơn, chuyển cửa sổ thuận tay hơn và biến góc màn hình thành lối tắt. Tìm kiếm, công cụ cửa sổ và góc nóng giúp những thao tác lặp lại trong ngày nhẹ đi một chút.
+
+### Đẹp theo gu của bạn
+
+Sáng hay tối. Kính mờ hay trong trẻo. Dịu mắt hay thêm chút màu sắc. Chỉnh dáng Dock, đổi phong cách biểu tượng và chọn logo Azr, vòng tròn tối giản hoặc ảnh riêng. Tiếng Việt và tiếng Anh đều có sẵn.
+
+Bắt đầu từ một thay đổi nhỏ. Phần còn lại, hãy để màn hình của bạn gợi ý.
+
+## Nhìn gần hơn
 
 <details>
-<summary>Màn hình Anh / Việt, bảng điều khiển kính và widget</summary>
+<summary>Xem màn hình nền, bảng điều khiển kính và widget</summary>
 
-![English desktop](docs/assets/desktop-user-en.png)
-![Vietnamese desktop](docs/assets/desktop-user-vi.png)
-![Glass controls](docs/assets/control-center-user.png)
-![Widgets](docs/assets/widgets-user.png)
+![Màn hình tiếng Anh](docs/assets/desktop-user-en.png)
+![Màn hình tiếng Việt](docs/assets/desktop-user-vi.png)
+![Bảng điều khiển kính](docs/assets/control-center-user.png)
+![Widget màn hình nền](docs/assets/widgets-user.png)
 
-Ảnh người dùng cung cấp, chụp trong Windows Sandbox. Ảnh widget có trước bản 0.1.1 sửa tên thứ sang tiếng Việt. Hình thức phụ thuộc hình nền, thiết lập và khả năng dựng hình.
 </details>
 
-![Task Manager](docs/assets/process-memory.png)
+Ảnh được chụp trong Windows Sandbox. Hiệu ứng kính thay đổi theo hình nền, thiết lập Windows, phần cứng và phiên làm việc từ xa. Một số ảnh thuộc giao diện trước đó; bản hiện tại đã cập nhật tên thứ tiếng Việt.
 
-## Tài nguyên sử dụng
+## Gọn nhẹ trong một lần quan sát
 
-Ảnh Task Manager cho thấy `azr` dùng **6,6 MB** ở cột bộ nhớ và **0,1% CPU**; `azr-guard` dùng **0,6 MB** và **0% CPU**: tổng khoảng **7,2 MB tại thời điểm chụp**. Hoạt động ổ đĩa lần lượt 0,1 MB/s và 0 MB/s; mạng đều 0 Mbps.
+![Tiến trình Azr trong Task Manager](docs/assets/process-memory.png)
 
-Đây là một lần quan sát, không phải benchmark, mức tối đa hay yêu cầu RAM cố định. Ảnh cắt không xác định chính xác bộ đếm bộ nhớ, thời gian lấy mẫu hoặc tài nguyên máy ảo. Số này không đại diện toàn bộ bộ nhớ cam kết hay bộ nhớ GPU/DWM. Tài nguyên thay đổi theo hiệu ứng, ảnh bìa, widget, bộ đệm, Windows, phần cứng và tính năng bật. Dung lượng ZIP, dung lượng giải nén và RAM khi chạy là các số đo khác nhau.
+Trong ảnh Task Manager này, Azr hiển thị **6,6 MB** bộ nhớ và **0,1% CPU**; tiến trình hỗ trợ khôi phục hiển thị **0,6 MB** và **0% CPU**—tổng khoảng **7,2 MB tại lúc chụp**. Đây là một lần quan sát, không phải benchmark hay yêu cầu cố định. Mức dùng thay đổi theo cấu hình và hoạt động; số hiển thị không bao gồm mọi chi phí bộ nhớ đồ họa hoặc hệ thống. Dung lượng tải về khác với RAM khi chạy.
 
-`azr.exe` quản lý và vẽ giao diện. `azr-guard.exe` hỗ trợ khôi phục thanh tác vụ khi bật chế độ thay thế thanh tác vụ. Thoát bình thường sẽ khôi phục thanh tác vụ; guard hỗ trợ trường hợp ứng dụng dừng bất thường.
+## Bắt đầu với Azr
 
-## Tệp và tích hợp Windows
+1. [Tải bản portable Windows x64 mới nhất](https://github.com/Ericismee/Azr/releases/latest).
+2. Giải nén ZIP và giữ các tệp đi kèm cùng nhau.
+3. Mở `azr.exe`, rồi vào Cài đặt để chọn phong cách của bạn.
 
-- Thư mục portable: `Azr-0.1.1`; chương trình: `azr.exe`, `azr-guard.exe`. Giữ `fonts` và `brand` cạnh EXE.
-- Cấu hình: `%APPDATA%\Azr`, hoặc `AZR_CONFIG_DIR`; các tệp mô tả gồm `settings.cfg`, `pins.txt`, `Azr.log`, `Azr-guard.log`.
-- Tự khởi động tùy chọn: giá trị `Azr` tại `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, mặc định tắt. Tên đối tượng đồng bộ tiến trình bắt đầu bằng `Local\Azr`.
-- Không thêm trình cài toàn hệ thống, dịch vụ hay driver Windows. Muốn gỡ: tắt tự khởi động, thoát Azr rồi xóa thư mục giải nén. Chỉ xóa riêng `%APPDATA%\Azr` nếu muốn bỏ cấu hình. Font và thư viện bên thứ ba giữ tên, giấy phép riêng.
+Cần **Windows 11 x64**. Giữ `azr-guard.exe`, `fonts` và `brand` cạnh ứng dụng. Không cần trình cài đặt, dịch vụ hay driver bổ sung. EXE chưa được ký số; mã kiểm tra tệp nằm trong `SHA256SUMS.txt` của release. Muốn tự build? Xem [hướng dẫn build](docs/BUILD.md).
 
-## Build và chạy
+## Bạn chọn những gì được bật
 
-Cần Windows 11 x64, Rust stable, Visual Studio Build Tools có công cụ C++ x64 và Windows SDK.
+Tự khởi động, thay thế thanh tác vụ, lịch sử bảng nhớ tạm, lời bài hát trực tuyến và chia sẻ tệp nội bộ đều **mặc định tắt**. Thiết lập lưu tại `%APPDATA%\Azr`. Tiến trình đi kèm hỗ trợ khôi phục thanh tác vụ khi bật chế độ thay thế và Azr dừng bất thường.
 
-```powershell
-git clone https://github.com/Ericismee/Azr.git
-cd Azr
-.uild.ps1
-```
+Lời bài hát trực tuyến dùng dịch vụ bên ngoài. Chia sẻ tệp nội bộ dùng HTTP không mã hóa, nên chỉ bật trên mạng tin cậy. Bạn có thể thử lần đầu trong Windows Sandbox. Muốn gỡ Azr, hãy tắt tự khởi động, thoát ứng dụng rồi xóa thư mục giải nén; xóa riêng hồ sơ nếu muốn bỏ cả thiết lập.
 
-Script chạy kiểm thử với dependency đã khóa, build release và tạo ZIP portable kèm SHA-256 trong `dist`. Script không tự mở hay cài ứng dụng. Giải nén rồi mở `azr.exe`; giữ `azr-guard.exe`, `fonts` và `brand` bên cạnh. Cách chạy thông thường không cần quyền quản trị. Thoát bằng menu ứng dụng hoặc biểu tượng khay hệ thống.
+## Đồng hành cùng Azr
 
-```powershell
-cargo fmt --all -- --check
-cargo test --locked --workspace
-```
-
-## Thiết lập giao diện
-
-Vào **Cài đặt → Dock** để chỉnh chất liệu, độ đục, độ mờ, nền và góc bo biểu tượng. Trang **Giao diện** có chủ đề và kiểu màu. Trang **Thanh menu** có lựa chọn logo và nút chọn ảnh. Ảnh nhập tối đa 8 MiB và 16 triệu điểm ảnh sau giải mã; ảnh không hợp lệ không thay thế logo đang dùng.
-
-<p align="center"><img src="docs/assets/menu-logo.png" width="720" alt="Các lựa chọn logo trên thanh menu"></p>
-
-## Quyền riêng tư và an toàn
-
-Mặc định tắt tự khởi động, thay thế thanh tác vụ, lịch sử bảng nhớ tạm, lời bài hát trực tuyến và chia sẻ tệp nội bộ. Cấu hình lưu tại `%APPDATA%\Azr`; dùng biến `AZR_CONFIG_DIR` nếu muốn đổi thư mục hồ sơ.
-
-Khi bật lời bài hát trực tuyến, ứng dụng kết nối LRCLIB qua HTTPS. Chia sẻ tệp nội bộ dùng HTTP không mã hóa với liên kết ngẫu nhiên, giới hạn thời gian; chỉ dùng trên mạng tin cậy. Tiến trình guard hỗ trợ khôi phục thanh tác vụ khi bật chế độ thay thế và ứng dụng dừng bất thường. Kiểm thử và quét chống mã độc không bảo đảm an toàn tuyệt đối. Nên thử lần đầu bằng Windows Sandbox.
-
-## Cấu trúc dự án
-
-- `crates/app`: cửa sổ ứng dụng, cài đặt và tích hợp màn hình nền.
-- `crates/core`: cấu hình, bố cục, logic vẽ và kiểm thử.
-- `crates/platform`: API và dịch vụ Windows.
-- `crates/ui`: đồ họa và hiệu ứng.
-- `crates/guard`: tiến trình hỗ trợ khôi phục thanh tác vụ.
-- `assets/brand`: logo và biểu tượng Azr.
-
-## Mức độ quan tâm
-
-Huy hiệu phía trên lấy số sao và fork trực tiếp từ GitHub. Repo mới nên biểu đồ có thể chưa có dữ liệu. Biểu đồ chỉ hiển thị số sao được ghi nhận, không dự đoán tăng trưởng.
+Nếu Azr tìm được một chỗ trên màn hình của bạn, một ngôi sao sẽ giúp người khác biết đến nó. Góp ý và ý tưởng luôn được chào đón tại [Issues](https://github.com/Ericismee/Azr/issues).
 
 [![Lịch sử sao](https://api.star-history.com/svg?repos=Ericismee/Azr&type=Date)](https://www.star-history.com/#Ericismee/Azr&Date)
 
 ## Giấy phép
 
-Phân phối theo [PolyForm Noncommercial 1.0.0](LICENSE.md); giấy phép này không cấp quyền sử dụng thương mại. Xem thông tin font và thư viện tại [Thành phần bên thứ ba](legal/THIRD-PARTY-LICENSES.md). Azr là dự án độc lập dành cho Windows, không liên kết với Apple hay Microsoft.
+[PolyForm Noncommercial 1.0.0](LICENSE.md) · [Thành phần bên thứ ba](legal/THIRD-PARTY-LICENSES.md)
+
+Azr là dự án độc lập dành cho Windows, không liên kết với Apple hay Microsoft. Hiệu ứng kính được triển khai riêng trên Windows.
