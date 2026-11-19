@@ -47,19 +47,20 @@ Azr là ứng dụng tùy biến giao diện dành cho **Windows 11**, lấy c�
 
 Trong ảnh Task Manager này, Azr hiển thị **6,6 MB** bộ nhớ và **0,1% CPU**; tiến trình hỗ trợ khôi phục hiển thị **0,6 MB** và **0% CPU**—tổng khoảng **7,2 MB tại lúc chụp**. Đây là một lần quan sát, không phải benchmark hay yêu cầu cố định. Mức dùng thay đổi theo cấu hình và hoạt động; số hiển thị không bao gồm mọi chi phí bộ nhớ đồ họa hoặc hệ thống. Dung lượng tải về khác với RAM khi chạy.
 
-## Bắt đầu với Azr
+## Tải và sử dụng
 
-1. [Tải bản portable Windows x64 mới nhất](https://github.com/Ericismee/Azr/releases/latest).
-2. Giải nén ZIP và giữ các tệp đi kèm cùng nhau.
-3. Mở `azr.exe` và vào Cài đặt để điều chỉnh giao diện, ngôn ngữ và các tính năng.
+Yêu cầu **Windows 11 x64 (Intel/AMD)**. Hai gói đều có sẵn thư viện Visual C++ cần thiết, font và logo; không cần cài Rust, Visual Studio, .NET hay Visual C++ Redistributable riêng.
 
-Cần **Windows 11 x64**. Giữ `azr-guard.exe`, `fonts` và `brand` cạnh ứng dụng. Không cần trình cài đặt, dịch vụ hay driver bổ sung. EXE chưa được ký số; mã kiểm tra tệp nằm trong `SHA256SUMS.txt` của release. Muốn tự build? Xem [hướng dẫn build](docs/BUILD.md).
+- **[Bản cài đặt EXE](https://github.com/Ericismee/Azr/releases/download/v0.1.1/Azr-Setup-0.1.1-x64.exe):** Chạy trình cài, sau đó mở Azr từ Start Menu. Ứng dụng được cài cho tài khoản hiện tại tại `%LOCALAPPDATA%\Programs\Azr`.
+- **[Bản portable đầy đủ](https://github.com/Ericismee/Azr/releases/download/v0.1.1/Azr-0.1.1-windows-x64-portable-complete.zip):** Giải nén toàn bộ ZIP rồi mở `azr.exe`. Giữ nguyên hai EXE, các DLL, thư mục `fonts` và `brand` đi kèm.
+
+Các gói chạy không chứa mã nguồn hay tệp debug. Thành phần hệ thống và driver đồ họa của Windows vẫn cần hoạt động bình thường. Windows 10, máy 32-bit và ARM chưa được xác nhận hỗ trợ. EXE chưa được ký số; xem `SHA256SUMS.txt` trong [release](https://github.com/Ericismee/Azr/releases/latest) để đối chiếu tệp tải về. Hướng dẫn tự build nằm tại [đây](docs/BUILD.md).
 
 ## Cấu hình và quyền riêng tư
 
 Tự khởi động, thay thế thanh tác vụ, lịch sử bảng nhớ tạm, lời bài hát trực tuyến và chia sẻ tệp nội bộ đều **mặc định tắt**. Thiết lập lưu tại `%APPDATA%\Azr`. Tiến trình đi kèm hỗ trợ khôi phục thanh tác vụ khi bật chế độ thay thế và Azr dừng bất thường.
 
-Lời bài hát trực tuyến dùng dịch vụ bên ngoài. Chia sẻ tệp nội bộ dùng HTTP không mã hóa, nên chỉ bật trên mạng tin cậy. Bạn có thể thử lần đầu trong Windows Sandbox. Muốn gỡ Azr, hãy tắt tự khởi động, thoát ứng dụng rồi xóa thư mục giải nén; xóa riêng hồ sơ nếu muốn bỏ cả thiết lập.
+Lời bài hát trực tuyến dùng dịch vụ bên ngoài. Chia sẻ tệp nội bộ dùng HTTP không mã hóa, nên chỉ bật trên mạng tin cậy. Bạn có thể thử lần đầu trong Windows Sandbox. Để gỡ bản cài đặt, dùng Settings → Apps → Installed apps → Azr của Windows. Với bản portable, tắt tự khởi động, thoát ứng dụng rồi xóa thư mục giải nén. Xóa riêng hồ sơ nếu muốn bỏ cả thiết lập.
 
 ## Phản hồi và đóng góp
 

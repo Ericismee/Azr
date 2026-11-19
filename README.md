@@ -46,19 +46,20 @@ Captured in Windows Sandbox, showing several appearance configurations. Glass ef
 
 In this Task Manager snapshot, Azr shows **6.6 MB** of memory and **0.1% CPU**, while its recovery companion shows **0.6 MB** and **0% CPU**—about **7.2 MB combined at that moment**. This is a single observation, not a benchmark or a fixed requirement. Usage changes with your setup and activity, and the displayed figures do not include every graphics or system memory cost. Download size is separate from runtime RAM.
 
-## Get started
+## Download and run
 
-1. [Download the latest Windows x64 portable release](https://github.com/Ericismee/Azr/releases/latest).
-2. Extract the ZIP and keep its files together.
-3. Open `azr.exe` and use Settings to adjust the appearance, language, and features.
+Requires **Windows 11 x64 (Intel/AMD)**. Both packages include the required Visual C++ runtime DLLs, fonts, and logo. You do not need Rust, Visual Studio, .NET, or a separate Visual C++ Redistributable installation.
 
-Requires **Windows 11 x64**. Keep `azr-guard.exe`, `fonts`, and `brand` beside the app. There is no installer, service, or driver to add. The EXEs are unsigned; release checksums are supplied in `SHA256SUMS.txt`. Prefer to build it yourself? See the [build guide](docs/BUILD.md).
+- **[EXE installer](https://github.com/Ericismee/Azr/releases/download/v0.1.1/Azr-Setup-0.1.1-x64.exe):** Run Setup, then open Azr from the Start Menu. It installs for the current user in `%LOCALAPPDATA%\Programs\Azr`.
+- **[Complete portable package](https://github.com/Ericismee/Azr/releases/download/v0.1.1/Azr-0.1.1-windows-x64-portable-complete.zip):** Extract the entire ZIP and open `azr.exe`. Keep both EXEs, the DLLs, `fonts`, and `brand` together.
+
+Runtime packages contain no source code or debug files. Windows system components and graphics drivers must still function normally. Windows 10, 32-bit systems, and ARM support have not been verified. EXEs are unsigned; use `SHA256SUMS.txt` in the [release](https://github.com/Ericismee/Azr/releases/latest) to verify downloads. To build from source, see the [build guide](docs/BUILD.md).
 
 ## Configuration and privacy
 
 Autostart, taskbar takeover, clipboard history, online lyrics, and local file sharing are **off by default**. Your settings live in `%APPDATA%\Azr`. The companion process helps restore the taskbar when takeover is enabled and Azr stops unexpectedly.
 
-Online lyrics use an external service. Local file sharing uses unencrypted HTTP and should only be enabled on a trusted network. For a first trial, Windows Sandbox is a convenient option. To remove Azr, disable autostart, exit the app, and delete the extracted folder; remove the profile separately if you also want to erase settings.
+Online lyrics use an external service. Local file sharing uses unencrypted HTTP and should only be enabled on a trusted network. For a first trial, Windows Sandbox is a convenient option. Uninstall the Setup version through Windows Settings → Apps → Installed apps → Azr. For the portable version, disable autostart, exit the app, and delete the extracted folder. Remove the profile separately if you also want to erase settings.
 
 ## Feedback and contributions
 
