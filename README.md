@@ -33,7 +33,6 @@ Azr is a desktop customization app for **Windows 11**, inspired by macOS. It add
 <summary>Explore the desktop, glass controls, and widgets</summary>
 
 ![English desktop](docs/assets/desktop-user-en.png)
-![Vietnamese desktop](docs/assets/desktop-user-vi.png)
 ![Glass control center](docs/assets/control-center-user.png)
 ![Desktop widgets](docs/assets/widgets-user.png)
 
