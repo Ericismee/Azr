@@ -74,10 +74,6 @@ Report bugs or suggest features through [Issues](https://github.com/Ericismee/Az
 
 Azr is an independent Windows project, not affiliated with Apple or Microsoft. Its glass effects are implemented for Windows.
 
-## Donate · Buy Me a Coffee
-
-If you enjoy using Azr and would like to support the project, you can scan the QR code below. Thank you for your support.
-
 <p align="center">
-  <img src="docs/assets/donate-qr.png" width="230" alt="Donation QR code">
+  <a href="https://azr-support.colorfulacorn8.chatgpt.site"><img src="docs/assets/buy-me-a-coffee.svg" width="280" alt="Buy me a coffee — Support Azr"></a>
 </p>

@@ -75,10 +75,6 @@ Bạn có thể báo lỗi hoặc đề xuất tính năng tại [Issues](https:
 
 Azr là dự án độc lập dành cho Windows, không liên kết với Apple hay Microsoft. Hiệu ứng kính được triển khai riêng trên Windows.
 
-## Donate · Buy Me a Coffee
-
-Nếu bạn thấy Azr hữu ích và muốn ủng hộ dự án, hãy quét mã QR bên dưới. Cảm ơn bạn đã đồng hành cùng Azr.
-
 <p align="center">
-  <img src="docs/assets/donate-qr.png" width="230" alt="Donation QR code">
+  <a href="https://azr-support.colorfulacorn8.chatgpt.site"><img src="docs/assets/buy-me-a-coffee.svg" width="280" alt="Buy me a coffee — Support Azr"></a>
 </p>
