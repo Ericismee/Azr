@@ -1,0 +1,17 @@
+# Donations: the README section contains the project donation QR code.
+custom:
+  - "https://github.com/Ericismee/Azr#donate--buy-me-a-coffee"
+
+# Add a platform only after its donation account has been configured.
+# github: [your-sponsors-enabled-username]
+# patreon: your-username
+# open_collective: your-project
+# ko_fi: your-username
+# tidelift: platform-name/package-name
+# community_bridge: your-project
+# liberapay: your-username
+# issuehunt: your-username
+# lfx_crowdfunding: your-project
+# polar: your-username
+# buy_me_a_coffee: your-username
+# thanks_dev: your-username
