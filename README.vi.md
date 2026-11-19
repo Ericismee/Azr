@@ -8,6 +8,7 @@
 [![Build](https://github.com/Ericismee/Azr/actions/workflows/ci.yml/badge.svg)](https://github.com/Ericismee/Azr/actions/workflows/ci.yml)
 [![Stars](https://img.shields.io/github/stars/Ericismee/Azr?style=flat)](https://github.com/Ericismee/Azr/stargazers)
 [![Forks](https://img.shields.io/github/forks/Ericismee/Azr?style=flat)](https://github.com/Ericismee/Azr/forks)
+[![Lượt tải](https://img.shields.io/github/downloads/Ericismee/Azr/total?style=flat&label=downloads)](https://github.com/Ericismee/Azr/releases)
 ![Windows 11](https://img.shields.io/badge/Windows-11-0078D4)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-64748b)](LICENSE.md)
 </div>
