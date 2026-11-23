@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Color;
@@ -269,9 +268,11 @@ fn apply_prefs() {
         services::post_island(crate::prefs::WM_PREFS);
     } else if want {
         let rescale = with_bar(|b| {
-            let want_dpi =
-                unsafe { GetDpiForWindow(b.popup.hwnd) }.max(96) as f32 / 96.0 * prefs::ui_scale();
+            let display = crate::display::selected();
+            let want_dpi = display.dpi() * prefs::ui_scale();
             (want_dpi - b.dpi).abs() > 0.01
+                || b.screen != display.size()
+                || (b.popup.rect.0, b.popup.rect.1) != display.origin()
         })
         .unwrap_or(false);
         if rescale {
@@ -296,7 +297,8 @@ fn apply_prefs() {
 }
 
 fn create(comp: &Compositor) -> windows_core::Result<Box<Bar>> {
-    let screen = sys::screen_size();
+    let display = crate::display::selected();
+    let screen = display.size();
     let glass = prefs::apply(
         azr_ui::glass::GlassParams::dark((10.0, 10.0), 0.0),
         &prefs::bar_look(),
@@ -308,7 +310,7 @@ fn create(comp: &Compositor) -> windows_core::Result<Box<Bar>> {
         WINDOW_EX_STYLE(0),
         glass,
     )?;
-    let dpi = unsafe { GetDpiForWindow(popup.hwnd) }.max(96) as f32 / 96.0 * prefs::ui_scale();
+    let dpi = display.dpi() * prefs::ui_scale();
     let notch_h = services::notch().map(|(_, _, h)| h as f32 / dpi);
     let h = (notch_h.unwrap_or(26.0) * dpi).round() as i32;
     let tier = {
@@ -320,7 +322,7 @@ fn create(comp: &Compositor) -> windows_core::Result<Box<Bar>> {
         }
     };
     let _ = popup.panel.set_tier(tier);
-    popup.set_rect(0, 0, screen.0, h)?;
+    popup.set_rect(display.origin().0, display.origin().1, screen.0, h)?;
     popup.panel.set_radius(0.0)?;
     popup.panel.set_rect(0.0, 0.0, 0.0, 0.0)?;
     let bg = comp.CreateSpriteVisual()?;
@@ -334,7 +336,8 @@ fn create(comp: &Compositor) -> windows_core::Result<Box<Bar>> {
     let layer = comp.CreateContainerVisual()?;
     popup.content.Children()?.InsertAtTop(&layer)?;
     let gfx = Gfx::shared(comp)?;
-    let menu = Menu::new(comp, popup.hwnd, dpi, screen, tier)?;
+    let mut menu = Menu::new(comp, popup.hwnd, dpi, screen, tier)?;
+    menu.set_work_area(display.bounds);
     popup.show();
     shell::appbar::reserve_top(popup.hwnd, screen.0, h);
     unsafe {
@@ -802,7 +805,9 @@ impl Bar {
             .unwrap_or((26.0 * d).round() as i32);
         if want_h != self.h {
             self.h = want_h;
-            let _ = self.popup.set_rect(0, 0, self.screen.0, self.h);
+            let _ =
+                self.popup
+                    .set_rect(self.popup.rect.0, self.popup.rect.1, self.screen.0, self.h);
             let _ = self.popup.panel.set_radius(0.0);
             self.apply_bg();
             shell::appbar::reserve_top(self.popup.hwnd, self.screen.0, self.h);
@@ -1567,8 +1572,10 @@ impl Bar {
             return;
         };
         let (comp, gfx) = (self.comp.clone(), &self.gfx);
-        let top = self.h;
-        let r = self.menu.show_below(&comp, gfx, items, x as i32, top);
+        let top = self.popup.rect.1 + self.h;
+        let r = self
+            .menu
+            .show_below(&comp, gfx, items, self.popup.rect.0 + x as i32, top);
         if let Err(e) = &r {
             log::line("menubar", &format!("menu gagal: {e}"));
         }
@@ -1946,6 +1953,14 @@ fn xy(lp: LPARAM) -> (f32, f32) {
 
 unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
+        WM_DISPLAYCHANGE => {
+            CTL.with(|c| {
+                if let Some(ctl) = c.borrow().as_ref() {
+                    let _ = PostMessageW(Some(ctl.hwnd), prefs::WM_PREFS, WPARAM(0), LPARAM(0));
+                }
+            });
+            LRESULT(0)
+        }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_MOUSEMOVE => {
             let (x, _) = xy(lp);

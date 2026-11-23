@@ -89,6 +89,7 @@ struct Mgr {
     comp: Compositor,
     gfx: Option<Gfx>,
     dpi: f32,
+    origin: (i32, i32),
     list: Vec<Widget>,
     cache: HashMap<String, (CompositionDrawingSurface, i32, i32)>,
     edit: bool,
@@ -217,10 +218,17 @@ fn utc_minutes() -> i32 {
 }
 
 fn area(dpi: f32) -> widgets::Rect {
-    let (sw, sh) = sys::screen_size();
+    let display = crate::display::selected();
+    let (sw, sh) = display.size();
+    let (x, y) = display.origin();
     let top = (44.0 * dpi) as i32;
     let side = (20.0 * dpi) as i32;
-    (side, top, sw - 2 * side, sh - top - (120.0 * dpi) as i32)
+    (
+        x + side,
+        y + top,
+        sw - 2 * side,
+        sh - top - (120.0 * dpi) as i32,
+    )
 }
 
 fn style() -> u8 {
@@ -289,13 +297,15 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
             Some(hi),
             None,
         )?;
-        let dpi = windows::Win32::UI::HiDpi::GetDpiForSystem().max(96) as f32 / 96.0;
+        let display = crate::display::selected();
+        let dpi = display.dpi();
         MGR.with(|c| {
             *c.borrow_mut() = Some(Mgr {
                 ctl,
                 comp: comp.clone(),
                 gfx: Gfx::shared(comp).ok(),
                 dpi,
+                origin: display.origin(),
                 list: Vec::new(),
                 cache: HashMap::new(),
                 edit: false,
@@ -416,7 +426,20 @@ impl Mgr {
     }
 
     fn rebuild_all(&mut self) {
-        let placed: Vec<(Kind, (i32, i32))> = self.list.iter().map(|w| (w.kind, w.pos)).collect();
+        let display = crate::display::selected();
+        let origin = display.origin();
+        let delta = (origin.0 - self.origin.0, origin.1 - self.origin.1);
+        let placed: Vec<_> = self
+            .list
+            .iter()
+            .map(|w| (w.kind, (w.pos.0 + delta.0, w.pos.1 + delta.1)))
+            .collect();
+        let moved = origin != self.origin || (display.dpi() - self.dpi).abs() > 0.01;
+        self.origin = origin;
+        self.dpi = display.dpi();
+        self.menu = None;
+        self.drag = None;
+
         for w in self.list.drain(..) {
             unsafe {
                 let _ = DestroyWindow(w.popup.hwnd);
@@ -424,7 +447,11 @@ impl Mgr {
         }
         self.cache.clear();
         for (k, p) in placed {
-            self.spawn(k, p, false);
+            let pos = self.slot_kind(None, k, p);
+            self.spawn(k, pos, false);
+        }
+        if moved {
+            self.save();
         }
     }
 
@@ -1541,7 +1568,11 @@ impl Mgr {
         let (x, y) = cursor();
         let d = self.dpi;
         if self.menu.is_none() {
-            self.menu = Menu::new(&self.comp, self.ctl, d, sys::screen_size(), Tier::Full).ok();
+            let display = crate::display::selected();
+            self.menu = Menu::new(&self.comp, self.ctl, d, display.size(), Tier::Full).ok();
+            if let Some(menu) = self.menu.as_mut() {
+                menu.set_work_area(display.bounds);
+            }
         }
         let items = vec![
             MItem::action(CMD_EDIT, prefs::tr("Edit Widgets\u{2026}"), true),
@@ -1592,10 +1623,10 @@ impl Mgr {
         ) else {
             return;
         };
-        let (sw, sh) = sys::screen_size();
+        let (sw, sh) = crate::display::selected().size();
         let _ = popup.set_rect(
-            ((sw as f32 - gw) / 2.0) as i32,
-            (sh as f32 - gh - 110.0 * d).max(40.0 * d) as i32,
+            self.origin.0 + ((sw as f32 - gw) / 2.0) as i32,
+            self.origin.1 + (sh as f32 - gh - 110.0 * d).max(40.0 * d) as i32,
             gw as i32,
             gh as i32,
         );
@@ -2001,6 +2032,12 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
 
 unsafe extern "system" fn widget_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
+        WM_DISPLAYCHANGE => {
+            with(|m| {
+                let _ = PostMessageW(Some(m.ctl), prefs::WM_PREFS, WPARAM(0), LPARAM(0));
+            });
+            LRESULT(0)
+        }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_WINDOWPOSCHANGING => {
             let p = lp.0 as *mut WINDOWPOS;

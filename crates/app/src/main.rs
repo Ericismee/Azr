@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod controlcenter;
+mod display;
 mod dock;
 mod fx;
 mod hotcorners;

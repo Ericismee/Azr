@@ -114,6 +114,7 @@ enum Action {
     Close,
     ProjectRepo,
     ProjectSupport,
+    MainDisplay(u8),
     Takeover,
     Dock(Behavior),
     Notch(Behavior),
@@ -1465,6 +1466,33 @@ impl Win {
                         ),
                     ],
                 ),
+                (Some(prefs::tr("Display")), {
+                    let mut rows = vec![RowDef::Pick(
+                        prefs::tr("Azr main display"),
+                        if s.main_display == 0 {
+                            prefs::tr("Windows main display").to_owned()
+                        } else {
+                            format!("{} {}", prefs::tr("Display"), s.main_display)
+                        },
+                        Action::MainDisplay(0),
+                    )];
+                    let selected = crate::display::selected().id;
+                    rows.extend(crate::display::list().into_iter().map(|display| {
+                        let (w, h) = display.size();
+                        let active = display.id == selected;
+                        let marker = if active { "✓ " } else { "" };
+                        RowDef::Pick(
+                            prefs::tr("Move Azr to this display"),
+                            format!(
+                                "{marker}{} {} · {w} × {h}",
+                                prefs::tr("Display"),
+                                display.id
+                            ),
+                            Action::MainDisplay(display.id),
+                        )
+                    }));
+                    rows
+                }),
                 (
                     Some("Launchpad"),
                     vec![
@@ -2911,6 +2939,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 Some(Action::IconVariant(v)) => prefs::update(|s| s.icon_variant = v),
                 Some(Action::MinEffect(v)) => prefs::update(|s| s.min_effect = v),
+                Some(Action::MainDisplay(id)) => prefs::update(|s| s.main_display = id),
                 Some(Action::ProjectRepo) => {
                     azr_platform::launch::open("https://github.com/Ericismee/Azr")
                 }

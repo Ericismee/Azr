@@ -352,6 +352,7 @@ pub struct Settings {
     pub widget_style: u8,
     pub battery_pct: u8,
     pub menu_logo: u8,
+    pub main_display: u8,
     pub overview_alt_tab: bool,
     pub launchpad_key: u8,
     pub launchpad_icon: u8,
@@ -430,6 +431,7 @@ impl Default for Settings {
             widget_style: 0,
             battery_pct: 2,
             menu_logo: 1,
+            main_display: 0,
             overview_alt_tab: false,
             launchpad_key: 0,
             launchpad_icon: 0,
@@ -459,6 +461,9 @@ impl Settings {
                 }
                 "overview_alt_tab" => {
                     s.overview_alt_tab = parse_bool(v).unwrap_or(s.overview_alt_tab);
+                }
+                "main_display" => {
+                    s.main_display = v.parse().unwrap_or(s.main_display);
                 }
                 "menu_logo" => {
                     s.menu_logo = v
@@ -897,6 +902,7 @@ impl Settings {
             "launchpad_key={}\nlaunchpad_icon={}\n",
             self.launchpad_key, self.launchpad_icon
         ));
+        text.push_str(&format!("main_display={}\n", self.main_display));
         text
     }
 }

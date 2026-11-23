@@ -2,11 +2,12 @@ use crate::popup::Popup;
 use azr_platform::text::{render, Style};
 use azr_platform::wins::thumbnail;
 use azr_ui::gfx::Gfx;
-use azr_ui::glass::GlassParams;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Composition::{CompositionDrawingSurface, CompositionStretch, Compositor};
 use windows_core::Result;
@@ -42,8 +43,15 @@ unsafe extern "system" fn proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT
             let _ = PostMessageW(Some(target), PREVIEW_LEAVE, WPARAM(0), LPARAM(0));
             LRESULT(0)
         }
+        WM_LBUTTONDOWN => {
+            SetCapture(h);
+            LRESULT(0)
+        }
         WM_LBUTTONUP => {
-            let _ = PostMessageW(Some(target), PREVIEW_CLICK, WPARAM(0), l);
+            if GetCapture() == h {
+                let _ = ReleaseCapture();
+                let _ = SendMessageW(target, PREVIEW_CLICK, Some(WPARAM(0)), Some(l));
+            }
             LRESULT(0)
         }
         _ => DefWindowProcW(h, m, w, l),
@@ -59,6 +67,7 @@ pub enum Hit {
 struct Cell {
     left: i32,
     right: i32,
+    top: i32,
     hwnd: isize,
     close: (i32, i32, i32),
     thumb: Option<isize>,
@@ -68,11 +77,16 @@ pub struct Preview {
     popup: Popup,
     cells: Vec<Cell>,
     dpi: f32,
-    screen_w: i32,
+    bounds: (i32, i32, i32, i32),
 }
 
 impl Preview {
-    pub fn new(comp: &Compositor, dock_hwnd: HWND, dpi: f32, screen_w: i32) -> Result<Preview> {
+    pub fn new(
+        comp: &Compositor,
+        dock_hwnd: HWND,
+        dpi: f32,
+        bounds: (i32, i32, i32, i32),
+    ) -> Result<Preview> {
         TARGET.store(dock_hwnd.0 as isize, Ordering::Relaxed);
         let popup = Popup::new(
             comp,
@@ -85,7 +99,7 @@ impl Preview {
             popup,
             cells: vec![],
             dpi,
-            screen_w,
+            bounds,
         })
     }
 
@@ -108,26 +122,26 @@ impl Preview {
     ) -> Result<()> {
         self.clear();
         let d = self.dpi;
-        let n = windows.len().min(6);
+        let n = windows.len();
         if n == 0 {
             return Ok(());
         }
         let (pad, gap, title_h) = ((12.0 * d) as i32, (6.0 * d) as i32, (26.0 * d) as i32);
-        let tw = ((200.0 * d) as i32).min(((self.screen_w - 8 - pad) / n as i32 - pad).max(1));
-        let th = ((125.0 * d) as i32).min(tw);
-        let w = pad + n as i32 * (tw + pad);
-        let h = pad + th + gap + title_h + pad;
-        let x = (cx - w / 2).clamp(4, (self.screen_w - w - 4).max(4));
-        self.popup.set_rect(x, bottom - h, w, h)?;
+        let (left, top, right, _) = self.bounds;
+        let (cols, rows, tw, th) = preview_grid(n, right - left, (bottom - top).max(1), d);
+        let w = pad + cols as i32 * (tw + pad);
+        let stride = th + gap + title_h + pad;
+        let h = pad + rows as i32 * stride;
+        let x = (cx - w / 2).clamp(left + 4, (right - w - 4).max(left + 4));
+        self.popup.set_rect(x, (bottom - h).max(top), w, h)?;
         self.popup.panel.set_radius(18.0 * d)?;
-        self.popup.show();
-
         let style = Style {
             px: (12.0 * d).round() as i32,
             weight: 500,
         };
-        for (i, (hwnd, title, minimized)) in windows.iter().take(n).enumerate() {
-            let x0 = pad + i as i32 * (tw + pad);
+        for (i, (hwnd, title, minimized)) in windows.iter().enumerate() {
+            let x0 = pad + (i % cols) as i32 * (tw + pad);
+            let row_y = pad + (i / cols) as i32 * stride;
             let thumb = if *minimized {
                 None
             } else {
@@ -146,7 +160,7 @@ impl Preview {
                     })?;
                     sprite.SetOffset(Vector3 {
                         X: (x0 + (tw - sz) / 2) as f32,
-                        Y: (pad + (th - sz) / 2) as f32,
+                        Y: (row_y + (th - sz) / 2) as f32,
                         Z: 0.0,
                     })?;
                     sprite.SetOpacity(0.55)?;
@@ -162,11 +176,11 @@ impl Preview {
                     ((sw as f32 * k) as i32).max(1),
                     ((sh as f32 * k) as i32).max(1),
                 );
-                let (dx, dy) = (x0 + (tw - dw) / 2, pad + (th - dh) / 2);
+                let (dx, dy) = (x0 + (tw - dw) / 2, row_y + (th - dh) / 2);
                 thumbnail::place(t, (dx, dy, dx + dw, dy + dh), 255);
             }
             let close_size = title_h.min(tw);
-            let title_y = pad + th + gap;
+            let title_y = row_y + th + gap;
             let title_width = (tw - close_size - gap).max(1);
             if let Some(bmp) = render(title, &style, title_width, title_h) {
                 let surface = gfx.surface_from_bgra(bmp.w, bmp.h, &bmp.bgra)?;
@@ -239,11 +253,13 @@ impl Preview {
             self.cells.push(Cell {
                 left: x0 - pad / 2,
                 right: x0 + tw + pad / 2,
+                top: row_y,
                 hwnd: *hwnd,
                 close: (close_x, title_y, close_size),
                 thumb,
             });
         }
+        self.popup.show();
         Ok(())
     }
 
@@ -270,12 +286,29 @@ impl Preview {
     }
 }
 
+fn preview_grid(n: usize, width: i32, height: i32, dpi: f32) -> (usize, usize, i32, i32) {
+    let pad = (12.0 * dpi) as i32;
+    let title = (26.0 * dpi) as i32;
+    let gap = (6.0 * dpi) as i32;
+    let max_cols = ((width - 8 - pad) / (pad + (105.0 * dpi) as i32)).max(1) as usize;
+    (1..=n.min(max_cols))
+        .map(|cols| {
+            let rows = n.div_ceil(cols);
+            let w = ((width - 8 - pad) / cols as i32 - pad).clamp(1, (200.0 * dpi) as i32);
+            let h = (((height - pad) / rows as i32) - gap - title - pad)
+                .clamp(1, w.min((125.0 * dpi) as i32));
+            (cols, rows, w, h)
+        })
+        .max_by_key(|&(cols, rows, w, h)| (w * h, std::cmp::Reverse(rows), std::cmp::Reverse(cols)))
+        .unwrap_or((1, 1, 1, 1))
+}
+
 impl Cell {
     fn hit(&self, x: i32, y: i32) -> Option<Hit> {
         let (left, top, size) = self.close;
         if (left..left + size).contains(&x) && (top..top + size).contains(&y) {
             Some(Hit::Close(self.hwnd))
-        } else if (self.left..self.right).contains(&x) && (0..top + size).contains(&y) {
+        } else if (self.left..self.right).contains(&x) && (self.top..top + size).contains(&y) {
             Some(Hit::Activate(self.hwnd))
         } else {
             None
@@ -288,10 +321,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wraps_a_large_group_inside_a_narrow_monitor() {
+        let (cols, rows, w, h) = preview_grid(9, 780, 700, 1.5);
+        assert!(rows > 1 && cols * rows >= 9);
+        assert!(18 + cols as i32 * (w + 18) <= 772);
+        assert!(18 + rows as i32 * (h + 9 + 39 + 18) <= 700);
+    }
+
+    #[test]
     fn close_button_does_not_overlap_the_activation_area() {
         let window = Cell {
             left: 8,
             right: 220,
+            top: 12,
             hwnd: 17,
             close: (180, 145, 26),
             thumb: None,

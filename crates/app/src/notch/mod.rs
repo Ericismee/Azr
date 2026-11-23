@@ -29,7 +29,6 @@ use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Composition::{
@@ -230,6 +229,7 @@ pub struct Notch {
     dpi: f32,
     win: (i32, i32),
     screen_w: i32,
+    origin: (i32, i32),
 
     mode: Mode,
     look: Look,
@@ -329,14 +329,15 @@ impl Notch {
                 Some(hi),
                 None,
             )?;
-            let dpi = GetDpiForWindow(hwnd).max(96) as f32 / 96.0 * crate::prefs::ui_scale();
-            let screen_w = sys::screen_size().0;
+            let display = crate::display::selected();
+            let dpi = display.dpi() * crate::prefs::ui_scale();
+            let screen_w = display.size().0;
             let win = win_size(dpi, screen_w);
             let _ = SetWindowPos(
                 hwnd,
                 None,
-                (screen_w - win.0) / 2,
-                0,
+                display.origin().0 + (screen_w - win.0) / 2,
+                display.origin().1,
                 win.0,
                 win.1,
                 SWP_NOACTIVATE | SWP_NOZORDER,
@@ -365,6 +366,7 @@ impl Notch {
                 dpi,
                 win,
                 screen_w,
+                origin: display.origin(),
                 mode: Mode::Rest,
                 look: rest,
                 size: state::size(rest, dpi),
@@ -1518,7 +1520,10 @@ impl Notch {
             (lp.0 as u32 & 0xFFFF) as u16 as i16 as f32,
             ((lp.0 as u32 >> 16) & 0xFFFF) as u16 as i16 as f32,
         );
-        let (cx, cy) = (sx - ((self.screen_w - self.win.0) / 2) as f32, sy);
+        let (cx, cy) = (
+            sx - (self.origin.0 + (self.screen_w - self.win.0) / 2) as f32,
+            sy - self.origin.1 as f32,
+        );
         match kind {
             drop::ENTER => {
                 self.drop_zone = None;
@@ -1568,7 +1573,7 @@ impl Notch {
                 &self.paint.comp,
                 self.hwnd,
                 self.dpi,
-                sys::screen_size(),
+                crate::display::selected().size(),
                 Tier::Full,
             ) {
                 Ok(m) => self.menu = Some(m),
@@ -1585,14 +1590,15 @@ impl Notch {
             MItem::action(4, tr("Remove from Shelf"), true),
         ];
         self.menu_item = Some(i);
-        let wx = (self.screen_w - self.win.0) / 2;
+        let wx = self.origin.0 + (self.screen_w - self.win.0) / 2;
         if let Some(m) = self.menu.as_mut() {
+            m.set_work_area(crate::display::selected().bounds);
             let _ = m.show(
                 &self.paint.comp,
                 &self.paint.gfx,
                 items,
                 wx + x as i32,
-                y as i32,
+                self.origin.1 + y as i32,
             );
         }
     }
@@ -1846,26 +1852,31 @@ impl Notch {
 
     fn pill_screen_rect(&self) -> (i32, i32, i32, i32) {
         let base = state::size(state::look(Mode::Rest, None), self.dpi);
-        let l = ((sys::screen_size().0 as f32 - base.w) / 2.0) as i32;
-        (l, 0, l + base.w as i32, (base.h + 4.0 * self.dpi) as i32)
+        let l = self.origin.0 + ((self.screen_w as f32 - base.w) / 2.0) as i32;
+        (
+            l,
+            self.origin.1,
+            l + base.w as i32,
+            self.origin.1 + (base.h + 4.0 * self.dpi) as i32,
+        )
     }
 
     fn place_strip(&self) {
         if let Some(s) = &self.strip {
             let (l, _, r, _) = self.pill_screen_rect();
             let pad = (60.0 * self.dpi) as i32;
-            s.place(l - pad, 0, r - l + 2 * pad, 2);
+            s.place(l - pad, self.origin.1, r - l + 2 * pad, 2);
             s.set_visible(!self.overlap.fullscreen && !self.off);
         }
     }
 
     fn place_shadow_window(&self) {
         if let Some(sh) = &self.shadow {
-            let x = (self.screen_w - self.win.0) / 2 - sh.pad as i32;
+            let x = self.origin.0 + (self.screen_w - self.win.0) / 2 - sh.pad as i32;
             sh.place_window(
                 self.hwnd,
                 x,
-                0,
+                self.origin.1,
                 self.win.0 + 2 * sh.pad as i32,
                 self.win.1 + sh.pad as i32,
             );
@@ -1937,7 +1948,11 @@ impl Notch {
             return;
         }
         let (l, _, r, h) = self.pill_screen_rect();
-        crate::services::set_notch(l, r, h - (4.0 * self.dpi) as i32);
+        crate::services::set_notch(
+            l - self.origin.0,
+            r - self.origin.0,
+            h - self.origin.1 - (4.0 * self.dpi) as i32,
+        );
     }
 
     fn set_reserved(&mut self, on: bool) {
@@ -2006,11 +2021,15 @@ impl Notch {
     }
 
     fn on_reconfigure(&mut self) {
-        let screen_w = sys::screen_size().0;
-        let dpi =
-            unsafe { GetDpiForWindow(self.hwnd) }.max(96) as f32 / 96.0 * crate::prefs::ui_scale();
+        let display = crate::display::selected();
+        let screen_w = display.size().0;
+        let dpi = display.dpi() * crate::prefs::ui_scale();
         let win = win_size(dpi, screen_w);
-        if win == self.win && screen_w == self.screen_w && (dpi - self.dpi).abs() < 0.01 {
+        if win == self.win
+            && screen_w == self.screen_w
+            && display.origin() == self.origin
+            && (dpi - self.dpi).abs() < 0.01
+        {
             return;
         }
         log::line(
@@ -2019,14 +2038,16 @@ impl Notch {
         );
         let dpi_changed = (dpi - self.dpi).abs() >= 0.01;
         self.screen_w = screen_w;
+        self.origin = display.origin();
+        self.menu = None;
         self.dpi = dpi;
         self.win = win;
         unsafe {
             let _ = SetWindowPos(
                 self.hwnd,
                 None,
-                (screen_w - win.0) / 2,
-                0,
+                display.origin().0 + (screen_w - win.0) / 2,
+                display.origin().1,
                 win.0,
                 win.1,
                 SWP_NOACTIVATE | SWP_NOZORDER,
@@ -2047,6 +2068,9 @@ impl Notch {
         self.place_shadow_window();
         self.place_strip();
         self.publish_notch();
+        if self.reserved {
+            self.set_reserved(true);
+        }
         self.first = true;
         let look = self.look;
         self.transition(look);

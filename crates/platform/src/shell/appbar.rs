@@ -1,6 +1,9 @@
 use std::sync::atomic::{AtomicIsize, Ordering};
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+};
 use windows::Win32::UI::Shell::{
     SHAppBarMessage, ABE_BOTTOM, ABE_TOP, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS, APPBARDATA,
 };
@@ -35,13 +38,26 @@ fn reserve(
             }
             slot.store(hwnd.0 as isize, Ordering::Relaxed);
         }
-        if top_edge {
-            abd.uEdge = ABE_TOP;
-            abd.rc = RECT {
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        let bounds = if GetMonitorInfoW(monitor, &mut info).as_bool() {
+            info.rcMonitor
+        } else {
+            RECT {
                 left: 0,
                 top: 0,
                 right: screen_w,
-                bottom: strip_h,
+                bottom: screen_h,
+            }
+        };
+        if top_edge {
+            abd.uEdge = ABE_TOP;
+            abd.rc = RECT {
+                bottom: bounds.top + strip_h,
+                ..bounds
             };
             SHAppBarMessage(ABM_QUERYPOS, &mut abd);
             abd.rc.bottom = abd.rc.top + strip_h;
@@ -50,10 +66,8 @@ fn reserve(
         } else {
             abd.uEdge = ABE_BOTTOM;
             abd.rc = RECT {
-                left: 0,
-                top: screen_h - strip_h,
-                right: screen_w,
-                bottom: screen_h,
+                top: bounds.bottom - strip_h,
+                ..bounds
             };
             SHAppBarMessage(ABM_QUERYPOS, &mut abd);
             abd.rc.top = abd.rc.bottom - strip_h;

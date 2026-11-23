@@ -10,7 +10,6 @@ use crate::strip::Strip;
 use azr_core::dock::items::{key_of, merge, package_family, Item, Pin};
 use azr_core::dock::layout::{hit, layout, Layout, Metrics, Slot};
 use azr_core::dock::reorder;
-use azr_core::dock::ring::next_in_ring;
 use azr_core::visibility::policy::{should_hide, Inputs, Mode};
 use azr_platform::icons;
 use azr_platform::wins::overlap::{self, Overlap};
@@ -31,7 +30,6 @@ use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
 };
@@ -148,6 +146,7 @@ pub struct Dock {
     screen: (i32, i32),
     win: (i32, i32),
     win_pos: (i32, i32),
+    origin: (i32, i32),
     card_y: f32,
     card_h: f32,
     margin: f32,
@@ -335,8 +334,9 @@ impl Dock {
                 Some(hi),
                 None,
             )?;
-            let dpi = GetDpiForWindow(hwnd).max(96) as f32 / 96.0 * crate::prefs::ui_scale();
-            let screen = sys::screen_size();
+            let display = crate::display::selected();
+            let dpi = display.dpi() * crate::prefs::ui_scale();
+            let screen = display.size();
             let m = metrics_from_prefs(dpi);
 
             let surface = host.attach(hwnd, (400.0, 120.0))?;
@@ -405,6 +405,7 @@ impl Dock {
                 screen,
                 win: (400, 120),
                 win_pos: (0, 0),
+                origin: display.origin(),
                 card_y: 0.0,
                 card_h: 0.0,
                 margin: 8.0 * dpi,
@@ -540,7 +541,10 @@ impl Dock {
         let need = self.max_content_width() + 2.0 * self.pad_side + 40.0 * self.dpi;
         let w = (need.ceil() as i32).clamp(200, self.screen.0);
         self.win.0 = w;
-        self.win_pos = ((self.screen.0 - w) / 2, self.screen.1 - self.win.1);
+        self.win_pos = (
+            self.origin.0 + (self.screen.0 - w) / 2,
+            self.origin.1 + self.screen.1 - self.win.1,
+        );
         unsafe {
             let _ = SetWindowPos(
                 self.hwnd,
@@ -573,10 +577,11 @@ impl Dock {
     }
 
     fn on_reconfigure(&mut self) {
-        let screen = sys::screen_size();
-        let dpi =
-            unsafe { GetDpiForWindow(self.hwnd) }.max(96) as f32 / 96.0 * crate::prefs::ui_scale();
-        if screen == self.screen && (dpi - self.dpi).abs() < 0.01 {
+        let display = crate::display::selected();
+        let screen = display.size();
+        let dpi = display.dpi() * crate::prefs::ui_scale();
+        if screen == self.screen && display.origin() == self.origin && (dpi - self.dpi).abs() < 0.01
+        {
             return;
         }
         log::line(
@@ -589,6 +594,8 @@ impl Dock {
         self.hide_popups();
         self.tooltip = None;
         self.preview = None;
+        self.menu = None;
+        self.origin = display.origin();
         self.screen = screen;
         self.dpi = dpi;
         self.m = metrics_from_prefs(dpi);
@@ -599,6 +606,7 @@ impl Dock {
             .set_radius(22.0 * dpi * crate::prefs::round(crate::prefs::Role::Dock));
         self.last_card = (0.0, 0.0, 0.0, 0.0);
         self.signature.clear();
+        self.resize_window();
         self.refresh_windows();
         if self.opts.appbar {
             self.reserve_strip();
@@ -703,7 +711,17 @@ impl Dock {
 
     fn place_strip(&self) {
         if let Some(s) = &self.strip {
-            s.place(self.win_pos.0, self.screen.1 - 2, self.win.0, 2);
+            let depth = if self.opts.mode == Mode::AutoHide {
+                (6.0 * self.dpi).round() as i32
+            } else {
+                2
+            };
+            s.place(
+                self.win_pos.0,
+                self.origin.1 + self.screen.1 - depth,
+                self.win.0,
+                depth,
+            );
         }
     }
 
@@ -1303,7 +1321,7 @@ impl Dock {
             return;
         };
         if self.tooltip.is_none() {
-            self.tooltip = Tooltip::new(&self.comp, self.dpi, self.screen.0)
+            self.tooltip = Tooltip::new(&self.comp, self.dpi, self.origin.0, self.screen.0)
                 .ok()
                 .map(|mut t| {
                     t.set_tier(self.tier);
@@ -1340,12 +1358,17 @@ impl Dock {
             return;
         };
         if self.preview.is_none() {
-            self.preview = Preview::new(&self.comp, self.hwnd, self.dpi, self.screen.0)
-                .ok()
-                .map(|mut p| {
-                    let _ = p.panel_mut().set_tier(self.tier);
-                    p
-                });
+            self.preview = Preview::new(
+                &self.comp,
+                self.hwnd,
+                self.dpi,
+                crate::display::selected().edges(),
+            )
+            .ok()
+            .map(|mut p| {
+                let _ = p.panel_mut().set_tier(self.tier);
+                p
+            });
         }
         if let Some(t) = &self.tooltip {
             t.hide();
@@ -1574,19 +1597,25 @@ impl Dock {
                 let Some(it) = self.items.get(i).cloned() else {
                     return;
                 };
+                let new_window = unsafe {
+                    windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(
+                        windows::Win32::UI::Input::KeyboardAndMouse::VK_SHIFT.0 as i32,
+                    ) < 0
+                };
                 if azr_platform::launch::is_task_manager_path(&it.path) {
                     launch::task_manager();
-                } else if it.running() {
-                    let target = if it.hwnds.len() > 1 {
-                        next_in_ring(&it.hwnds, focus::foreground()).unwrap_or(it.hwnds[0])
+                } else if it.hwnds.len() > 1 && !new_window {
+                    self.hover = Some(idx);
+                    self.show_preview();
+                } else if let Some(&target) = it.hwnds.first().filter(|_| !new_window) {
+                    let h = HWND(target as *mut _);
+                    let fg = HWND(focus::foreground() as *mut _);
+                    let front = fg == h || unsafe { GetAncestor(fg, GA_ROOTOWNER) == h };
+                    if front && !focus::is_minimized(target) {
+                        focus::request_close(target);
                     } else {
-                        it.hwnds[0]
-                    };
-                    let ok = self.activate_target(target);
-                    log::line(
-                        "dock",
-                        &format!("aktifkan {} hwnd={target} ok={ok}", it.name),
-                    );
+                        self.activate_target(target);
+                    }
                 } else {
                     launch::open(&it.path);
                     if let Some(v) = self.views.get(idx) {
@@ -1689,7 +1718,11 @@ impl Dock {
             ));
         }
         if let Some(it) = &info.item {
-            items.push(menu::Item::action(CMD_OPEN, crate::prefs::tr("Open"), true));
+            items.push(menu::Item::action(
+                CMD_OPEN,
+                crate::prefs::tr(if it.running() { "New window" } else { "Open" }),
+                true,
+            ));
             let can_pin = it.pinned || !it.path.contains('?');
             items.push(menu::Item::action(
                 CMD_PIN,
@@ -1800,6 +1833,7 @@ impl Dock {
             ),
         );
         if let Some(m) = self.menu.as_mut() {
+            m.set_work_area(crate::display::selected().bounds);
             if let Err(e) = m.show(&self.comp, &self.gfx, items, pt.x, bottom) {
                 log::line("menu", &format!("gagal: {e}"));
                 self.on_menu_close();
@@ -1849,6 +1883,7 @@ impl Dock {
         }
         let bottom = self.win_pos.1 + self.card_y as i32 - (6.0 * self.dpi) as i32;
         if let Some(m) = self.menu.as_mut() {
+            m.set_work_area(crate::display::selected().bounds);
             if let Err(e) = m.show(&self.comp, &self.gfx, items, pt.x, bottom) {
                 log::line("menu", &format!("gagal: {e}"));
                 self.on_menu_close();
@@ -2225,7 +2260,15 @@ impl Dock {
 
     fn on_strip_enter(&mut self) {
         if self.opts.mode != Mode::Always {
-            timer(self.hwnd, TIMER_DWELL, 200);
+            timer(
+                self.hwnd,
+                TIMER_DWELL,
+                if self.opts.mode == Mode::AutoHide {
+                    60
+                } else {
+                    150
+                },
+            );
         }
     }
 
