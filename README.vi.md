@@ -17,7 +17,9 @@ Azr là ứng dụng tùy biến giao diện dành cho **Windows 11**, lấy c�
 
 **[Tải bản mới nhất](https://github.com/Ericismee/Azr/releases/latest)** · [Ảnh giao diện](#ảnh-giao-diện) · [English](README.md) · [Khoe desktop của bạn](https://github.com/Ericismee/Azr/discussions/3)
 
-![Giao diện Azr trên Windows 11](docs/assets/desktop-user-vi.png)
+[![Desktop Azr trên Windows 11 với Dock kính, Dynamic Island và widget](docs/assets/azr-desktop-showcase.png)](https://github.com/Ericismee/Azr/discussions/3)
+
+*Bạn tùy biến Azr thế nào? [Chia sẻ ảnh desktop của bạn](https://github.com/Ericismee/Azr/discussions/3).*
 
 ## Tính năng chính
 

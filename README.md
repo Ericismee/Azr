@@ -17,7 +17,9 @@ Azr is a desktop customization app for **Windows 11**, inspired by macOS. It add
 
 **[Download the latest release](https://github.com/Ericismee/Azr/releases/latest)** · [Share your desktop](https://github.com/Ericismee/Azr/discussions/3) · [Screenshots](#screenshots) · [Tiếng Việt](README.vi.md)
 
-![Azr on Windows 11](docs/assets/desktop-user-en.png)
+[![Azr desktop on Windows 11 with a glass Dock, Dynamic Island, and widgets](docs/assets/azr-desktop-showcase.png)](https://github.com/Ericismee/Azr/discussions/3)
+
+*What does Azr look like on your desktop? [Share your setup](https://github.com/Ericismee/Azr/discussions/3).*
 
 ## Main features
 
