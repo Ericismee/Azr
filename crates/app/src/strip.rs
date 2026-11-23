@@ -1,6 +1,6 @@
 use std::sync::Once;
 use windows::core::w;
-use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{GetStockObject, BLACK_BRUSH, HBRUSH};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
@@ -114,8 +114,29 @@ impl Strip {
         }
     }
 
+    pub fn cursor_inside(&self) -> bool {
+        let mut point = POINT::default();
+        let mut rect = RECT::default();
+        unsafe {
+            IsWindowVisible(self.hwnd).as_bool()
+                && GetCursorPos(&mut point).is_ok()
+                && GetWindowRect(self.hwnd, &mut rect).is_ok()
+                && (rect.left..rect.right).contains(&point.x)
+                && (rect.top..rect.bottom).contains(&point.y)
+        }
+    }
+
     pub fn set_visible(&self, on: bool) {
         unsafe {
+            if IsWindowVisible(self.hwnd).as_bool() == on {
+                return;
+            }
+            if !on {
+                let state = GetWindowLongPtrW(self.hwnd, GWLP_USERDATA) as *mut State;
+                if let Some(state) = state.as_mut() {
+                    state.inside = false;
+                }
+            }
             let _ = ShowWindow(self.hwnd, if on { SW_SHOWNOACTIVATE } else { SW_HIDE });
         }
     }

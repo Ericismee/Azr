@@ -19,9 +19,7 @@ use azr_ui::gfx::Gfx;
 use azr_ui::glass::{GlassPanel, GlassParams, Tier};
 use azr_ui::host::{Host, Surface};
 use menu::{Menu, MENU_CLOSE, MENU_PICK};
-use preview::{
-    Hit as PreviewHit, Preview, PREVIEW_CLICK, PREVIEW_ENTER, PREVIEW_LEAVE, PREVIEW_MOVE,
-};
+use preview::{Hit as PreviewHit, Preview, PREVIEW_CLICK, PREVIEW_LEAVE, PREVIEW_MOVE};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
@@ -57,7 +55,8 @@ const TIMER_TIP: usize = 102;
 const TIMER_PREVIEW: usize = 103;
 const TIMER_GRACE: usize = 104;
 const TIMER_DWELL: usize = 105;
-const TIMER_PCLOSE: usize = 106;
+const TIMER_PREVIEW_GUARD: usize = 106;
+const PREVIEW_TRANSFER: Duration = Duration::from_millis(400);
 const TIMER_HIDEWIN: usize = 107;
 const TIMER_START: usize = 108;
 const TIMER_REGION: usize = 109;
@@ -206,9 +205,9 @@ pub struct Dock {
     revealing: bool,
     overlap: Overlap,
     grace: bool,
-    edge_armed: bool,
     menu_open: bool,
     preview_hover: bool,
+    preview_outside_since: Option<Instant>,
     tier: Tier,
     strip: Option<Strip>,
     tooltip: Option<Tooltip>,
@@ -467,9 +466,9 @@ impl Dock {
                 revealing: false,
                 overlap: Overlap::default(),
                 grace: false,
-                edge_armed: false,
                 menu_open: false,
                 preview_hover: false,
+                preview_outside_since: None,
                 tier,
                 strip: if mode == Mode::Always {
                     None
@@ -739,14 +738,8 @@ impl Dock {
     }
 
     fn sync_strip(&self) {
-        if self.off {
-            if let Some(s) = &self.strip {
-                s.set_visible(false);
-            }
-            return;
-        }
         if let Some(s) = &self.strip {
-            s.set_visible(!self.overlap.fullscreen);
+            s.set_visible(!self.off && !self.shown && !self.overlap.fullscreen);
         }
     }
 
@@ -764,17 +757,15 @@ impl Dock {
         let inputs = Inputs {
             overlapped: self.overlap.overlapped,
             interacting: self.interacting(),
-            edge_armed: self.edge_armed,
+            edge_armed: false,
             starting: self.starting,
             fullscreen: self.overlap.fullscreen,
             revealing: self.revealing,
         };
         let hide = self.off || should_hide(self.opts.mode, &inputs);
-        self.sync_strip();
         if self.overlap.fullscreen {
             if self.shown || unsafe { IsWindowVisible(self.hwnd).as_bool() } {
                 self.shown = false;
-                self.edge_armed = false;
                 kill(self.hwnd, TIMER_DWELL);
                 kill(self.hwnd, TIMER_HIDEWIN);
                 self.hide_popups();
@@ -787,6 +778,7 @@ impl Dock {
                     let _ = ShowWindow(self.hwnd, SW_HIDE);
                 }
             }
+            self.sync_strip();
             return;
         }
         if hide && self.shown {
@@ -805,6 +797,7 @@ impl Dock {
             self.animate_stage(0.0);
             log::line("dock", "tampil");
         }
+        self.sync_strip();
     }
 
     fn start_grace(&mut self) {
@@ -814,13 +807,11 @@ impl Dock {
 
     pub fn refresh_windows(&mut self) {
         self.overlap = overlap::evaluate(
-            tracker::external_foreground(),
+            crate::fullscreen::foreground_for_overlap(),
             self.hwnd,
             self.card_screen_rect(),
         );
-        if crate::fullscreen::active() {
-            self.overlap.fullscreen = true;
-        }
+        self.overlap.fullscreen = crate::fullscreen::active();
         if self.overlap.fullscreen {
             self.update_visibility();
             return;
@@ -835,6 +826,12 @@ impl Dock {
             .iter()
             .map(|i| (i.key.clone(), i.pinned, i.hwnds.len(), i.path.clone()))
             .collect();
+        if self.preview.as_ref().is_some_and(|preview| {
+            preview.is_visible() && !items.iter().any(|item| preview.has_sources(&item.hwnds))
+        }) {
+            self.hide_popups();
+            self.hover = None;
+        }
         self.items = items;
         if sig != self.signature {
             self.signature = sig;
@@ -1230,7 +1227,6 @@ impl Dock {
             self.opts.appbar = appbar;
             if mode == Mode::Always {
                 self.strip = None;
-                self.edge_armed = false;
             } else if self.strip.is_none() {
                 self.strip = Strip::new(self.hwnd, STRIP_ENTER, STRIP_LEAVE).ok();
                 self.place_strip();
@@ -1289,6 +1285,7 @@ impl Dock {
 
     fn hide_popups(&mut self) {
         kill(self.hwnd, TIMER_PEEK);
+        kill(self.hwnd, TIMER_PREVIEW_GUARD);
         kill(self.hwnd, TIMER_TIP);
         kill(self.hwnd, TIMER_PREVIEW);
         if let Some(t) = &self.tooltip {
@@ -1298,6 +1295,7 @@ impl Dock {
             p.hide();
         }
         self.preview_hover = false;
+        self.preview_outside_since = None;
     }
 
     fn icon_anchor(&self, slot: usize) -> Option<(i32, i32)> {
@@ -1393,8 +1391,52 @@ impl Dock {
             let bottom = top - (10.0 * self.dpi) as i32;
             if let Err(e) = p.show(&self.comp, &self.gfx, &wins, icon.as_ref(), cx, bottom) {
                 log::line("preview", &format!("gagal: {e}"));
+            } else if p.is_visible() {
+                self.preview_outside_since = None;
+                timer(self.hwnd, TIMER_PREVIEW_GUARD, 80);
             }
         }
+    }
+
+    fn guard_preview(&mut self) {
+        let Some(preview) = self.preview.as_mut().filter(|preview| preview.is_visible()) else {
+            self.preview_hover = false;
+            self.preview_outside_since = None;
+            return;
+        };
+        self.preview_hover = preview.contains_cursor();
+        if !self.preview_hover {
+            preview.cancel_peek();
+        }
+
+        let mut point = POINT::default();
+        let cursor_known = unsafe { GetCursorPos(&mut point) }.is_ok();
+        let x = (point.x - self.win_pos.0) as f32;
+        let y = (point.y - self.win_pos.1) as f32;
+        let over_icon = cursor_known && self.in_icon_band(y) && self.entry_at(x).is_some();
+        if self.preview_hover || over_icon {
+            self.preview_outside_since = None;
+        } else if self
+            .preview_outside_since
+            .get_or_insert_with(Instant::now)
+            .elapsed()
+            >= PREVIEW_TRANSFER
+        {
+            self.hide_popups();
+            if cursor_known
+                && self.tracking
+                && (x < 0.0 || x >= self.win.0 as f32 || y < 0.0 || y >= self.win.1 as f32)
+            {
+                self.on_leave();
+            }
+            self.update_visibility();
+            return;
+        }
+        timer(self.hwnd, TIMER_PREVIEW_GUARD, 80);
+    }
+
+    fn in_icon_band(&self, y: f32) -> bool {
+        y >= self.icon_y - self.m.icon * (self.m.max_scale - 1.0) && y < self.card_y + self.card_h
     }
 
     fn entry_at(&self, x: f32) -> Option<(usize, Entry)> {
@@ -1415,7 +1457,11 @@ impl Dock {
             self.grace = false;
             kill(self.hwnd, TIMER_GRACE);
         }
-        let slot = self.entry_at(x).map(|(i, _)| i);
+        let slot = if self.in_icon_band(y) {
+            self.entry_at(x).map(|(i, _)| i)
+        } else {
+            None
+        };
         if slot != self.hover {
             self.hover = slot;
             if let Some(t) = &self.tooltip {
@@ -1466,9 +1512,6 @@ impl Dock {
         kill(self.hwnd, TIMER_PREVIEW);
         if let Some(t) = &self.tooltip {
             t.hide();
-        }
-        if self.preview.as_ref().is_some_and(|p| p.is_visible()) {
-            timer(self.hwnd, TIMER_PCLOSE, 200);
         }
         if self.exprs_ok {
             self.set_influence(false);
@@ -2239,17 +2282,15 @@ impl Dock {
                 self.update_visibility();
             }
             TIMER_DWELL => {
-                self.edge_armed = true;
-                self.update_visibility();
-            }
-            TIMER_PCLOSE => {
-                if !self.preview_hover && !self.tracking {
-                    if let Some(p) = self.preview.as_mut() {
-                        p.hide();
-                    }
+                if !self.shown
+                    && !self.overlap.fullscreen
+                    && self.strip.as_ref().is_some_and(Strip::cursor_inside)
+                {
+                    self.start_grace();
+                    self.update_visibility();
                 }
-                self.update_visibility();
             }
+            TIMER_PREVIEW_GUARD => self.guard_preview(),
             TIMER_HIDEWIN => {
                 if !self.shown {
                     unsafe {
@@ -2286,7 +2327,7 @@ impl Dock {
     }
 
     fn on_strip_enter(&mut self) {
-        if self.opts.mode != Mode::Always {
+        if !self.shown && !self.overlap.fullscreen && self.opts.mode != Mode::Always {
             timer(
                 self.hwnd,
                 TIMER_DWELL,
@@ -2301,11 +2342,6 @@ impl Dock {
 
     fn on_strip_leave(&mut self) {
         kill(self.hwnd, TIMER_DWELL);
-        if self.edge_armed {
-            self.edge_armed = false;
-            self.start_grace();
-            self.update_visibility();
-        }
     }
 
     fn on_preview_click(&mut self, x: i32, y: i32) {
@@ -2436,15 +2472,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             with_dock(hwnd, |d| d.on_strip_leave());
             LRESULT(0)
         }
-        PREVIEW_ENTER => {
-            with_dock(hwnd, |d| {
-                d.preview_hover = true;
-                kill(hwnd, TIMER_PCLOSE);
-            });
-            LRESULT(0)
-        }
         PREVIEW_MOVE => {
             if let Some(arm) = with_dock(hwnd, |d| {
+                d.preview_hover = true;
                 d.preview
                     .as_mut()?
                     .update_peek_target(lp.0 as i16 as i32, (lp.0 >> 16) as i16 as i32)
@@ -2460,12 +2490,14 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         PREVIEW_LEAVE => {
             with_dock(hwnd, |d| {
+                if d.preview.as_ref().is_some_and(Preview::contains_cursor) {
+                    return;
+                }
                 d.preview_hover = false;
                 kill(hwnd, TIMER_PEEK);
                 if let Some(preview) = &mut d.preview {
                     preview.cancel_peek();
                 }
-                timer(hwnd, TIMER_PCLOSE, 200);
             });
             LRESULT(0)
         }

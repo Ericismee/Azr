@@ -31,7 +31,7 @@ impl FullscreenDetection {
         if foreground_pid == 0 {
             return geometry;
         }
-        if geometry || self.exclusive_owner.is_none() {
+        if geometry {
             self.exclusive_owner = Some(foreground_pid);
         }
         geometry || self.exclusive_owner == Some(foreground_pid)
@@ -47,13 +47,17 @@ pub fn active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
 
-pub fn poll() {
-    let fg = focus::foreground();
-    let candidate = if crate::topmost::is_own_window(fg) {
+pub fn foreground_for_overlap() -> isize {
+    let foreground = focus::foreground();
+    if crate::topmost::is_own_window(foreground) {
         tracker::external_foreground()
     } else {
-        fg
-    };
+        foreground
+    }
+}
+
+pub fn poll() {
+    let candidate = focus::foreground();
     let geometry = overlap::foreground_fullscreen(candidate);
     let exclusive = unsafe { SHQueryUserNotificationState() }
         .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN);
@@ -98,9 +102,17 @@ mod tests {
     }
 
     #[test]
+    fn shell_exclusive_hint_cannot_claim_an_unconfirmed_foreground_window() {
+        let mut state = FullscreenDetection::default();
+        assert!(!state.observe(13, false, true));
+        assert!(state.observe(7, true, true));
+        assert!(!state.observe(13, false, true));
+    }
+
+    #[test]
     fn exclusive_signal_does_not_follow_alt_tab_to_another_app() {
         let mut state = FullscreenDetection::default();
-        assert!(state.observe(7, false, true));
+        assert!(state.observe(7, true, true));
         assert!(!state.observe(13, false, true));
         assert!(!state.observe(13, false, true));
         assert!(state.observe(7, false, true));

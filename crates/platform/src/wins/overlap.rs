@@ -9,7 +9,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic,
-    IsWindowVisible, IsZoomed, GWL_EXSTYLE, GWL_STYLE, WS_CAPTION, WS_EX_TOOLWINDOW,
+    IsWindowVisible, IsZoomed, GWL_EXSTYLE, GWL_STYLE, WS_CAPTION, WS_EX_TOOLWINDOW, WS_THICKFRAME,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -54,9 +54,12 @@ fn frame_rect(h: HWND) -> Option<RECT> {
     Some(r)
 }
 
-fn covers_monitor(frame: RECT, monitor: RECT, maximized: bool, captioned: bool) -> bool {
+fn fullscreen_frame(frame: RECT, monitor: RECT, maximized: bool, style: u32) -> bool {
     const BORDER_TOLERANCE: i32 = 8;
-    !(maximized && captioned)
+    let captioned = style & WS_CAPTION.0 == WS_CAPTION.0;
+    let resizable = style & WS_THICKFRAME.0 != 0;
+    !captioned
+        && !(maximized && resizable)
         && frame.left <= monitor.left + BORDER_TOLERANCE
         && frame.top <= monitor.top + BORDER_TOLERANCE
         && frame.right >= monitor.right - BORDER_TOLERANCE
@@ -65,7 +68,6 @@ fn covers_monitor(frame: RECT, monitor: RECT, maximized: bool, captioned: bool) 
 
 struct Foreground {
     frame: RECT,
-    maximized: bool,
     fullscreen: bool,
 }
 
@@ -94,21 +96,17 @@ fn on_monitor(fg: isize, monitor: HMONITOR) -> Option<Foreground> {
         }
         let frame = frame_rect(h)?;
         let maximized = IsZoomed(h).as_bool();
-        let captioned = (GetWindowLongW(h, GWL_STYLE) as u32 & WS_CAPTION.0) == WS_CAPTION.0;
+        let style = GetWindowLongW(h, GWL_STYLE) as u32;
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
             ..Default::default()
         };
         let fullscreen = GetMonitorInfoW(monitor, &mut info).as_bool()
-            && covers_monitor(frame, info.rcMonitor, maximized, captioned);
+            && fullscreen_frame(frame, info.rcMonitor, maximized, style);
         if !fullscreen && GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0 {
             return None;
         }
-        Some(Foreground {
-            frame,
-            maximized,
-            fullscreen,
-        })
+        Some(Foreground { frame, fullscreen })
     }
 }
 
@@ -122,11 +120,6 @@ pub fn primary_fullscreen(fg: isize) -> bool {
     on_monitor(fg, monitor).is_some_and(|window| window.fullscreen)
 }
 
-pub fn fullscreen_on(fg: isize, surface: HWND) -> bool {
-    let monitor = unsafe { MonitorFromWindow(surface, MONITOR_DEFAULTTONULL) };
-    on_monitor(fg, monitor).is_some_and(|window| window.fullscreen)
-}
-
 pub fn evaluate(fg: isize, surface: HWND, area: (i32, i32, i32, i32)) -> Overlap {
     let monitor = unsafe { MonitorFromWindow(surface, MONITOR_DEFAULTTONULL) };
     let Some(window) = on_monitor(fg, monitor) else {
@@ -135,7 +128,7 @@ pub fn evaluate(fg: isize, surface: HWND, area: (i32, i32, i32, i32)) -> Overlap
     let r = window.frame;
     let hit = r.bottom > area.1 && r.top < area.3 && r.right > area.0 && r.left < area.2;
     Overlap {
-        overlapped: window.fullscreen || window.maximized || hit,
+        overlapped: hit,
         fullscreen: window.fullscreen,
     }
 }
@@ -156,47 +149,55 @@ mod tests {
     #[test]
     fn accepts_small_borderless_gaps_but_not_a_window_leaving_the_taskbar_space() {
         let monitor = rect(-1920, 0, 0, 1080);
-        assert!(covers_monitor(
+        assert!(fullscreen_frame(
             rect(-1918, 1, -3, 1077),
             monitor,
             false,
-            false
+            0
         ));
-        assert!(!covers_monitor(
+        assert!(!fullscreen_frame(
             rect(-1920, 0, 0, 1040),
             monitor,
             false,
-            false
+            0
         ));
-        assert!(!covers_monitor(
+        assert!(!fullscreen_frame(
             rect(-1918, 1, -3, 1077),
             monitor,
             true,
-            true
+            WS_CAPTION.0
         ));
+    }
+
+    #[test]
+    fn maximized_custom_chrome_does_not_become_fullscreen_when_the_taskbar_is_hidden() {
+        let monitor = rect(0, 1080, 1920, 2160);
+        // A maximized WinUI window has a resize frame but no system caption.
+        assert!(!fullscreen_frame(
+            rect(0, 1080, 1920, 2158),
+            monitor,
+            true,
+            0x15070000
+        ));
+        assert!(fullscreen_frame(monitor, monitor, false, 0x94020000));
     }
 
     #[test]
     fn detects_borderless_fullscreen_on_negative_origin_monitor() {
         let monitor = rect(-1920, -200, 0, 880);
-        assert!(covers_monitor(monitor, monitor, false, false));
-        assert!(covers_monitor(
+        assert!(fullscreen_frame(monitor, monitor, false, 0));
+        assert!(fullscreen_frame(
             rect(-1928, -208, 8, 888),
             monitor,
             true,
-            false
+            0
         ));
     }
 
     #[test]
     fn rejects_maximized_captioned_windows_and_partial_coverage() {
         let monitor = rect(0, 0, 1920, 1080);
-        assert!(!covers_monitor(monitor, monitor, true, true));
-        assert!(!covers_monitor(
-            rect(0, 0, 1920, 1040),
-            monitor,
-            false,
-            false
-        ));
+        assert!(!fullscreen_frame(monitor, monitor, true, WS_CAPTION.0));
+        assert!(!fullscreen_frame(rect(0, 0, 1920, 1040), monitor, false, 0));
     }
 }

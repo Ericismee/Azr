@@ -5,7 +5,7 @@ use azr_ui::gfx::Gfx;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use windows::core::w;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{MonitorFromRect, MONITOR_DEFAULTTONULL};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
@@ -16,7 +16,6 @@ use windows_core::Result;
 use windows_numerics::{Vector2, Vector3};
 
 pub const PREVIEW_CLICK: u32 = WM_APP + 7;
-pub const PREVIEW_ENTER: u32 = WM_APP + 8;
 pub const PREVIEW_LEAVE: u32 = WM_APP + 9;
 pub const PREVIEW_MOVE: u32 = WM_APP + 16;
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -37,7 +36,6 @@ unsafe extern "system" fn proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT
                     dwHoverTime: 0,
                 };
                 let _ = TrackMouseEvent(&mut t);
-                let _ = PostMessageW(Some(target), PREVIEW_ENTER, WPARAM(0), LPARAM(0));
             }
             let _ = SendMessageW(target, PREVIEW_MOVE, Some(WPARAM(0)), Some(l));
             LRESULT(0)
@@ -244,16 +242,11 @@ impl Preview {
         let h = pad + rows as i32 * stride;
         let x = (cx - w / 2).clamp(left + 4, (right - w - 4).max(left + 4));
         let rect = (x, (bottom - h).max(top), w, h);
-        let (_, _, previous_width, previous_height) = self.popup.rect;
+        if self.is_visible() && self.windows == windows {
+            return Ok(());
+        }
         if self.popup.rect != rect {
             self.popup.set_rect(rect.0, rect.1, rect.2, rect.3)?;
-        }
-        if self.is_visible()
-            && self.windows == windows
-            && previous_width == w
-            && previous_height == h
-        {
-            return Ok(());
         }
         self.cancel_peek();
         self.windows.clear();
@@ -419,8 +412,36 @@ impl Preview {
         Some(target.is_some())
     }
 
+    pub fn contains_cursor(&self) -> bool {
+        self.cursor_position().is_some()
+    }
+
+    fn cursor_position(&self) -> Option<(i32, i32)> {
+        let mut point = POINT::default();
+        if !self.is_visible() || unsafe { GetCursorPos(&mut point) }.is_err() {
+            return None;
+        }
+        let (left, top, width, height) = self.popup.rect;
+        let (x, y) = (point.x - left, point.y - top);
+        ((0..width).contains(&x) && (0..height).contains(&y)).then_some((x, y))
+    }
+
+    pub fn has_sources(&self, windows: &[isize]) -> bool {
+        self.windows.len() == windows.len()
+            && self
+                .windows
+                .iter()
+                .all(|(handle, _, _)| windows.contains(handle))
+    }
+
     pub fn show_peek(&mut self, comp: &Compositor) -> Result<()> {
-        let Some(target) = self.pending_peek.filter(|_| self.is_visible()) else {
+        let Some((x, y)) = self.cursor_position() else {
+            return Ok(());
+        };
+        let Some(target) = self
+            .pending_peek
+            .filter(|target| self.hit(x, y) == Some(Hit::Activate(*target)))
+        else {
             return Ok(());
         };
         if self.peek.is_none() {

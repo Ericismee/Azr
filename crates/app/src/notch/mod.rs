@@ -2138,11 +2138,11 @@ impl Notch {
             }
             T_WINCHG => {
                 let mut ov = overlap::evaluate(
-                    tracker::external_foreground(),
+                    crate::fullscreen::foreground_for_overlap(),
                     self.hwnd,
                     self.pill_screen_rect(),
                 );
-                ov.fullscreen |= crate::fullscreen::active();
+                ov.fullscreen = crate::fullscreen::active();
                 if ov != self.overlap {
                     let was_fullscreen = self.overlap.fullscreen;
                     self.overlap = ov;

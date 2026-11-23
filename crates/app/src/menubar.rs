@@ -649,12 +649,7 @@ impl Bar {
     }
 
     fn check_fullscreen(&mut self) {
-        let fg = focus::foreground();
-        if fg == 0 || fg == self.popup.hwnd.0 as isize {
-            return;
-        }
-        let full = crate::fullscreen::active()
-            || azr_platform::wins::overlap::fullscreen_on(fg, self.popup.hwnd);
+        let full = crate::fullscreen::active();
         if full != self.fullscreen {
             self.fullscreen = full;
             if full {
