@@ -131,8 +131,17 @@ pub fn reveal_task_manager() -> bool {
     }
 }
 
+pub fn is_task_manager_path(path: &str) -> bool {
+    path.rsplit(['\\', '/'])
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case("taskmgr.exe"))
+}
+
 pub fn task_manager() {
-    if !reveal_task_manager() {
+    if reveal_task_manager() {
+        crate::log::line("launch", "Task Manager window activated");
+    } else {
+        crate::log::line("launch", "Task Manager requested from Windows");
         run("taskmgr.exe", "");
     }
 }

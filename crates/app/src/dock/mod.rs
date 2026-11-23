@@ -20,7 +20,7 @@ use azr_ui::gfx::Gfx;
 use azr_ui::glass::{GlassPanel, GlassParams, Tier};
 use azr_ui::host::{Host, Surface};
 use menu::{Menu, MENU_CLOSE, MENU_PICK};
-use preview::{Preview, PREVIEW_CLICK, PREVIEW_ENTER, PREVIEW_LEAVE};
+use preview::{Hit as PreviewHit, Preview, PREVIEW_CLICK, PREVIEW_ENTER, PREVIEW_LEAVE};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
@@ -1574,7 +1574,9 @@ impl Dock {
                 let Some(it) = self.items.get(i).cloned() else {
                     return;
                 };
-                if it.running() {
+                if azr_platform::launch::is_task_manager_path(&it.path) {
+                    launch::task_manager();
+                } else if it.running() {
                     let target = if it.hwnds.len() > 1 {
                         next_in_ring(&it.hwnds, focus::foreground()).unwrap_or(it.hwnds[0])
                     } else {
@@ -2236,11 +2238,15 @@ impl Dock {
         }
     }
 
-    fn on_preview_click(&mut self, x: i32) {
-        let target = self.preview.as_ref().and_then(|p| p.hit(x));
-        if let Some(h) = target {
-            let ok = self.activate_target(h);
-            log::line("dock", &format!("pratinjau → aktifkan hwnd={h} ok={ok}"));
+    fn on_preview_click(&mut self, x: i32, y: i32) {
+        match self.preview.as_ref().and_then(|p| p.hit(x, y)) {
+            Some(PreviewHit::Activate(hwnd)) => {
+                focus::force_foreground(hwnd);
+            }
+            Some(PreviewHit::Close(hwnd)) => {
+                focus::request_close(hwnd);
+            }
+            None => return,
         }
         self.hide_popups();
         self.start_grace();
@@ -2371,8 +2377,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             LRESULT(0)
         }
         PREVIEW_CLICK => {
-            let x = wp.0 as isize as i32;
-            with_dock(hwnd, |d| d.on_preview_click(x));
+            let x = lp.0 as i16 as i32;
+            let y = (lp.0 >> 16) as i16 as i32;
+            with_dock(hwnd, |d| d.on_preview_click(x, y));
             LRESULT(0)
         }
         WM_DISPLAYCHANGE | WM_DPICHANGED => {
