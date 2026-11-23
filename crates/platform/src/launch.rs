@@ -114,6 +114,29 @@ pub fn toggle_start(was_open_at_press: bool) {
     }
 }
 
+pub fn reveal_task_manager() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindowAsync, SW_RESTORE, SW_SHOW,
+    };
+    unsafe {
+        let Ok(window) = FindWindowW(w!("TaskManagerWindow"), None) else {
+            return false;
+        };
+        if IsIconic(window).as_bool() {
+            let _ = ShowWindowAsync(window, SW_RESTORE);
+        } else if !IsWindowVisible(window).as_bool() {
+            let _ = ShowWindowAsync(window, SW_SHOW);
+        }
+        SetForegroundWindow(window).as_bool()
+    }
+}
+
+pub fn task_manager() {
+    if !reveal_task_manager() {
+        run("taskmgr.exe", "");
+    }
+}
+
 pub fn run(file: &str, params: &str) {
     dispatch(
         system_tool(file),

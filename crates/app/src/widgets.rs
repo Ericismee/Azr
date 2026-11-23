@@ -1533,7 +1533,7 @@ impl Mgr {
             Kind::Clock | Kind::WorldClock | Kind::Digital => launch::open("ms-clock:"),
             Kind::Calendar | Kind::Month => launch::open("ms-actioncenter:"),
             Kind::Battery => launch::open("ms-settings:batterysaver"),
-            Kind::System => launch::run("taskmgr.exe", ""),
+            Kind::System => launch::task_manager(),
         }
     }
 

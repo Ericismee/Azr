@@ -19,7 +19,14 @@ pub fn grid(sizes: &[(f32, f32)], area: Rect, gap: f32, label_h: f32) -> Vec<Rec
         if cw <= 0.0 || ch <= 0.0 {
             continue;
         }
-        let thumb = (cw / 1.6).min(ch);
+        let thumb = sizes
+            .iter()
+            .map(|&(w, h)| {
+                let (w, h) = (w.max(1.0), h.max(1.0));
+                let scale = (cw / w).min(ch / h).min(1.0);
+                (w * h).sqrt() * scale
+            })
+            .sum::<f32>();
         if best.map(|b| thumb > b.0).unwrap_or(true) {
             best = Some((thumb, cols));
         }
@@ -41,7 +48,7 @@ pub fn grid(sizes: &[(f32, f32)], area: Rect, gap: f32, label_h: f32) -> Vec<Rec
         let (w, h) = (sw * k, sh * k);
         out.push(Rect {
             x: x0 + (cw - w) / 2.0,
-            y: y0 + r as f32 * (ch + label_h + gap) + (ch - h),
+            y: y0 + r as f32 * (ch + label_h + gap) + (ch - h) / 2.0,
             w,
             h,
         });

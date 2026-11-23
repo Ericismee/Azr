@@ -18,8 +18,18 @@ pub fn spawn_once(guard_exe: &Path, parent_pid: u32, marker: &Path) -> std::io::
         return Ok(());
     }
     let base = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
+    let embedded = !guard_exe.is_file();
+    let executable = if embedded {
+        std::env::current_exe()?
+    } else {
+        guard_exe.to_owned()
+    };
     let run = |flags: u32| {
-        Command::new(guard_exe)
+        let mut command = Command::new(&executable);
+        if embedded {
+            command.arg("--taskbar-guard");
+        }
+        command
             .arg(parent_pid.to_string())
             .arg(marker)
             .creation_flags(flags)

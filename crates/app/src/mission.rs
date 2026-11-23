@@ -3,7 +3,7 @@ use crate::prefs;
 use azr_core::mission::{grid, Rect};
 use azr_platform::icons::Bitmap;
 use azr_platform::text::{measure, render, Style};
-use azr_platform::wins::{enumerate, focus, snapshot, thumbnail};
+use azr_platform::wins::{enumerate, focus, snapshot, thumbnail, tracker};
 use azr_platform::{log, sys};
 use azr_ui::gfx::Gfx;
 use std::cell::RefCell;
@@ -25,7 +25,7 @@ use windows_numerics::{Vector2, Vector3};
 
 const HOTKEY_ID: i32 = 0xAB03;
 const T_ANIM: usize = 1;
-const ANIM_MS: f32 = 240.0;
+const ANIM_MS: f32 = 185.0;
 
 struct Tile {
     hwnd: isize,
@@ -141,6 +141,13 @@ pub fn shutdown() {
 pub fn toggle() {
     if MC.with(|c| c.borrow().is_some()) {
         close();
+    } else {
+        show();
+    }
+}
+
+pub fn show() {
+    if MC.with(|c| c.borrow().is_some()) {
         return;
     }
     let comp = CTL.with(|c| c.borrow().as_ref().map(|c| c.comp.clone()));
@@ -196,10 +203,11 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
     popup.panel.set_radius(0.0)?;
     let dst = popup.hwnd.0 as isize;
 
-    let wins: Vec<_> = enumerate::list(std::process::id())
+    let mut wins: Vec<_> = enumerate::list(std::process::id())
         .into_iter()
         .filter(|w| !focus::is_minimized(w.hwnd))
         .collect();
+    wins.sort_by_key(|w| std::cmp::Reverse(tracker::recent(w.hwnd)));
     let mut tiles = Vec::new();
     let mut sizes = Vec::new();
     for w in &wins {
@@ -276,7 +284,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 
 impl Mc {
     fn step(&mut self) {
-        let t = (self.t0.elapsed().as_millis() as f32 / ANIM_MS).clamp(0.0, 1.0);
+        let t = (self.t0.elapsed().as_secs_f32() * 1000.0 / ANIM_MS).clamp(0.0, 1.0);
         let e = 1.0 - (1.0 - t).powi(3);
         for tile in &self.tiles {
             let (f, to) = (tile.from, tile.to);

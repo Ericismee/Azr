@@ -352,6 +352,7 @@ pub struct Settings {
     pub widget_style: u8,
     pub battery_pct: u8,
     pub menu_logo: u8,
+    pub overview_alt_tab: bool,
     pub launchpad_key: u8,
     pub launchpad_icon: u8,
 }
@@ -429,6 +430,7 @@ impl Default for Settings {
             widget_style: 0,
             battery_pct: 2,
             menu_logo: 1,
+            overview_alt_tab: false,
             launchpad_key: 0,
             launchpad_icon: 0,
         }
@@ -454,6 +456,9 @@ impl Settings {
                 }
                 "launchpad_icon" => {
                     s.launchpad_icon = v.parse::<u8>().ok().filter(|n| *n <= 3).unwrap_or(0);
+                }
+                "overview_alt_tab" => {
+                    s.overview_alt_tab = parse_bool(v).unwrap_or(s.overview_alt_tab);
                 }
                 "menu_logo" => {
                     s.menu_logo = v
@@ -884,7 +889,10 @@ impl Settings {
             self.icon_round,
             self.icon_background
         ));
-        text.push_str(&format!("menu_logo={}\n", self.menu_logo));
+        text.push_str(&format!(
+            "menu_logo={}\noverview_alt_tab={}\n",
+            self.menu_logo, self.overview_alt_tab
+        ));
         text.push_str(&format!(
             "launchpad_key={}\nlaunchpad_icon={}\n",
             self.launchpad_key, self.launchpad_icon
@@ -1362,6 +1370,13 @@ pub fn dock_look(s: &Settings, system_dark: bool) -> Look {
 #[cfg(test)]
 mod launchpad_pref_tests {
     use super::*;
+
+    #[test]
+    fn overview_alt_tab_requires_explicit_opt_in() {
+        assert!(!Settings::parse("switcher=true\n").overview_alt_tab);
+        let selected = Settings::parse("overview_alt_tab=true\n");
+        assert!(Settings::parse(&selected.serialize()).overview_alt_tab);
+    }
 
     #[test]
     fn launchpad_defaults_and_changes_survive_reload() {

@@ -109,22 +109,23 @@ pub fn reset() {
     GEN.fetch_add(1, Ordering::Relaxed);
 }
 
-pub fn bitmap(px: u32, rgb: [u8; 3]) -> Option<Bitmap> {
-    let mode = crate::prefs::get().menu_logo;
-    if mode == 0 {
-        return None;
+pub fn original_bitmap(px: u32) -> Option<Bitmap> {
+    let bytes = include_bytes!("../../../assets/brand/azr-liquid-glass.png");
+    let image = azr_platform::wic::decode_square(bytes, (px * 4).max(64))?;
+    Some(fit(trim(image), px, px))
+}
+
+pub fn bitmap(px: u32) -> Option<Bitmap> {
+    match crate::prefs::get().menu_logo {
+        0 => None,
+        2 => path()
+            .and_then(|path| {
+                azr_platform::wic::decode_logo_file_fit(&path.to_string_lossy(), (px * 4).max(64))
+            })
+            .map(|image| fit(trim(image), px, px))
+            .or_else(|| original_bitmap(px)),
+        _ => original_bitmap(px),
     }
-    let bundled = std::env::current_exe()
-        .ok()?
-        .parent()?
-        .join("brand/azr-liquid-glass.png");
-    let source = if mode == 2 {
-        path().unwrap_or(bundled)
-    } else {
-        bundled
-    };
-    let b = azr_platform::wic::decode_logo_file_fit(&source.to_string_lossy(), (px * 4).max(64))?;
-    Some(fit(trim(template(b, rgb)), px, px))
 }
 
 pub fn trim(b: Bitmap) -> Bitmap {

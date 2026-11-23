@@ -184,6 +184,8 @@ enum RowDef {
     Slider(&'static str, u8, u8),
     Pick(&'static str, String, Action),
     Info(&'static str, &'static str),
+    Brand,
+    Corners([azr_core::settings::HotAction; 4]),
     Swatches(&'static str, usize),
     Thumbs(&'static str, Vec<(&'static str, Thumb, Action)>, usize),
     Radios(Vec<(&'static str, Action)>, usize),
@@ -210,6 +212,11 @@ const ACCENT_NAMES: [&str; 9] = [
 
 fn row_label(r: &RowDef) -> &'static str {
     match r {
+        RowDef::Brand => "",
+        RowDef::Corners(_) => {
+            prefs::tr("Move the pointer into a screen corner to run its assigned action.")
+        }
+
         RowDef::Toggle(l, ..)
         | RowDef::Seg(l, ..)
         | RowDef::Slider(l, ..)
@@ -810,6 +817,7 @@ impl Win {
                 22.0
             }
             RowDef::Slider(..) => 30.0,
+            RowDef::Brand | RowDef::Corners(_) => 102.0,
             RowDef::Text(..) | RowDef::Pick(..) | RowDef::Info(..) => 30.0,
             RowDef::Seg(_, opts, _) => {
                 let widths: Vec<f32> = opts
@@ -1271,6 +1279,75 @@ impl Win {
                         0,
                     );
                     self.region(lx, cy, inner * d, 30.0 * d, Action::EditText(*field));
+                }
+                RowDef::Brand => {
+                    let size = (90.0 * d).round() as u32;
+                    let key = format!("about-logo-{size}");
+                    let surface = self.thumbs.get(&key).cloned().or_else(|| {
+                        let image = crate::menulogo::original_bitmap(size)?;
+                        let mut pixels = vec![0; (size * size * 4) as usize];
+                        let offset = ((size - image.w) / 2, (size - image.h) / 2);
+                        for (row, src) in image.bgra.chunks_exact(image.w as usize * 4).enumerate()
+                        {
+                            let start =
+                                ((row + offset.1 as usize) * size as usize + offset.0 as usize) * 4;
+                            pixels[start..start + src.len()].copy_from_slice(src);
+                        }
+                        self.thumb_surface(key, size, size, || pixels)
+                    });
+                    if let Some(surface) = surface {
+                        let w = size as f32;
+                        self.sprite(
+                            c,
+                            &surface,
+                            lx + (inner * d - w) / 2.0,
+                            cy + (102.0 * d - w) / 2.0,
+                            w,
+                            w,
+                        );
+                    }
+                }
+                RowDef::Corners(actions) => {
+                    let w = 174.0 * d;
+                    let h = 90.0 * d;
+                    let x = lx + (inner * d - w) / 2.0;
+                    let y = cy + 5.0 * d;
+                    self.rect(c, x, y, w, h, 13.0 * d, col(look.fg, 40));
+                    self.rect(
+                        c,
+                        x + 3.0 * d,
+                        y + 3.0 * d,
+                        w - 6.0 * d,
+                        h - 6.0 * d,
+                        10.0 * d,
+                        col(look.fg, 16),
+                    );
+                    for (i, action) in actions.iter().enumerate() {
+                        let px = if i % 2 == 0 {
+                            x + 7.0 * d
+                        } else {
+                            x + w - 29.0 * d
+                        };
+                        let py = if i < 2 { y + 7.0 * d } else { y + h - 29.0 * d };
+                        let color = if *action == azr_core::settings::HotAction::None {
+                            col(look.fg, 70)
+                        } else {
+                            prefs::accent_c(235)
+                        };
+                        self.rect(c, px, py, 22.0 * d, 22.0 * d, 6.0 * d, color);
+                        self.region(px, py, 22.0 * d, 22.0 * d, Action::HotCycle(i));
+                    }
+                    self.text(
+                        c,
+                        prefs::tr("Preview"),
+                        x + w / 2.0,
+                        y + 36.0 * d,
+                        11.0,
+                        600,
+                        look.fg,
+                        0.75,
+                        1,
+                    );
                 }
                 RowDef::Info(_, value) => {
                     self.text_fit(
@@ -1867,8 +1944,8 @@ impl Win {
                             Action::StageOn,
                         ),
                         RowDef::Toggle(
-                            prefs::tr("Replace Alt+Tab with the Azr switcher"),
-                            s.switcher,
+                            prefs::tr("Open Overview with Alt+Tab"),
+                            s.overview_alt_tab,
                             Action::SwitcherOn,
                         ),
                         RowDef::Toggle(
@@ -1917,20 +1994,15 @@ impl Win {
             ],
             6 => {
                 let names = ["Top left", "Top right", "Bottom left", "Bottom right"];
-                vec![(
-                    None,
-                    names
-                        .iter()
-                        .enumerate()
-                        .map(|(i, nm)| {
-                            RowDef::Pick(
-                                prefs::tr(nm),
-                                prefs::tr(hot_label(s.hot[i])).to_string(),
-                                Action::HotCycle(i),
-                            )
-                        })
-                        .collect(),
-                )]
+                let mut rows = vec![RowDef::Corners(s.hot)];
+                rows.extend(names.iter().enumerate().map(|(i, name)| {
+                    RowDef::Pick(
+                        prefs::tr(name),
+                        prefs::tr(hot_label(s.hot[i])).to_string(),
+                        Action::HotCycle(i),
+                    )
+                }));
+                vec![(None, rows)]
             }
             8 => vec![(
                 None,
@@ -1954,6 +2026,7 @@ impl Win {
                 (
                     Some(prefs::tr("About Azr")),
                     vec![
+                        RowDef::Brand,
                         RowDef::Info(prefs::tr("Version"), env!("CARGO_PKG_VERSION")),
                         RowDef::Info(prefs::tr("Developer"), "Ericismee"),
                         RowDef::Pick(
@@ -2859,7 +2932,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Action::MenuBarOn) => prefs::update(|s| s.menubar = !s.menubar),
                 Some(Action::HotCycle(i)) => prefs::update(|s| s.hot[i] = s.hot[i].next()),
                 Some(Action::StageOn) => prefs::update(|s| s.stage = !s.stage),
-                Some(Action::SwitcherOn) => prefs::update(|s| s.switcher = !s.switcher),
+                Some(Action::SwitcherOn) => {
+                    prefs::update(|s| s.overview_alt_tab = !s.overview_alt_tab)
+                }
                 Some(Action::StageFlag(k)) => prefs::update(|s| match k {
                     1 => s.stage_desktop_click = !s.stage_desktop_click,
                     2 => s.stage_media = !s.stage_media,

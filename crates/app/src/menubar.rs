@@ -1025,7 +1025,7 @@ impl Bar {
         let (surf, lw, lh) = match hit {
             Some(v) => v,
             None => {
-                let (bw, bh, data) = match crate::menulogo::bitmap(size, rgb) {
+                let (bw, bh, data) = match crate::menulogo::bitmap(size) {
                     Some(b) => (b.w, b.h, b.bgra),
                     None => (
                         size,
@@ -1720,6 +1720,7 @@ impl Bar {
                         prefs::tr("Hide the Windows taskbar")
                     ),
                 ),
+                a(108, &prefs::tr("Open Task Manager")),
                 a(104, &prefs::tr("Force Quit Azr")),
                 Item::separator(),
                 a(110, &prefs::tr("Sleep")),
@@ -1822,6 +1823,7 @@ impl Bar {
             103 => crate::settings_win::open(&self.comp),
             104 => crate::mainwin::request_quit(),
             107 => crate::mainwin::toggle_taskbar(),
+            108 => launch::task_manager(),
             105 => crate::launchpad::toggle(),
             106 => crate::mission::toggle(),
             110 => confirm_power(

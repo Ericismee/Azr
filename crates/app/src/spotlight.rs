@@ -2457,7 +2457,7 @@ fn run_action(id: &str) {
         "stage" => prefs::update(|s| s.stage = !s.stage),
         "mission" => crate::mission::toggle(),
         "calc" => launch::run("calc.exe", ""),
-        "taskmgr" => launch::run("taskmgr.exe", ""),
+        "taskmgr" => launch::task_manager(),
         "settings" => launch::open("ms-settings:"),
         "clearclip" => clipboard::clear(),
         _ => {}

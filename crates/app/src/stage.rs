@@ -149,6 +149,13 @@ fn take_paused(app: Option<&str>) -> Vec<Vec<String>> {
 }
 
 fn excluded(app: &str) -> bool {
+    if app
+        .rsplit(['\\', '/'])
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case("taskmgr.exe"))
+    {
+        return true;
+    }
     let Ok(t) = std::fs::read_to_string(paths::config_dir().join("stage_exclude.txt")) else {
         return false;
     };

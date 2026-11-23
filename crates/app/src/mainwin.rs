@@ -132,7 +132,14 @@ pub fn apply_autostart() {
 pub fn set_taskbar_hidden(on: bool) {
     if on {
         if let Err(e) = taskbar::hide(&paths::marker(), &paths::guard_exe()) {
-            azr_platform::log::line("taskbar", &format!("hide gagal: {e}"));
+            azr_platform::log::line("taskbar", &format!("hide failed: {e}"));
+            let message = windows::core::HSTRING::from(format!(
+                "{}\n\n{e}",
+                crate::prefs::tr("Azr could not hide the Windows taskbar.")
+            ));
+            unsafe {
+                let _ = MessageBoxW(None, &message, w!("Azr"), MB_OK | MB_ICONWARNING);
+            }
         }
     } else {
         taskbar::restore();

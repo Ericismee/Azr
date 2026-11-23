@@ -133,6 +133,15 @@ impl Drop for ExitGuard {
 }
 
 fn main() {
+    let mut raw = std::env::args_os().skip(1);
+    if raw.next().is_some_and(|arg| arg == "--taskbar-guard") {
+        if let (Some(pid), Some(marker)) = (raw.next(), raw.next()) {
+            if let Ok(pid) = pid.to_string_lossy().parse() {
+                azr_platform::shell::recovery::wait_and_restore(pid, std::path::Path::new(&marker));
+            }
+        }
+        return;
+    }
     let args = parse_args();
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -246,7 +255,7 @@ fn main() {
     if let Err(e) = controlcenter::init(&host.compositor) {
         log::line("controlcenter", &format!("gagal: {e}"));
     }
-    if let Err(e) = switcher::init(&host.compositor) {
+    if let Err(e) = switcher::init() {
         log::line("switcher", &format!("gagal: {e}"));
     }
     if let Err(e) = menubar::init(&host.compositor) {

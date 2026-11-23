@@ -41,6 +41,13 @@ const VI: &[(&str, &str)] = &[
     ("Dock corner roundness", "Độ bo góc Dock"),
     ("System menu", "Menu hệ thống"),
     ("Dynamic Island", "Dynamic Island"),
+    ("Open Overview with Alt+Tab", "Mở Tổng quan bằng Alt+Tab"),
+    ("Move the pointer into a screen corner to run its assigned action.", "Rê chuột vào một góc màn hình để thực hiện tác vụ đã gán. Bấm một góc trong hình để đổi tác vụ."),
+    ("Preview", "Xem trước"),
+    (
+        "Azr could not hide the Windows taskbar.",
+        "Azr chưa ẩn được thanh tác vụ Windows.",
+    ),
     ("About & Support", "Giới thiệu và ủng hộ"),
     ("About Azr", "Giới thiệu Azr"),
     ("Version", "Phiên bản"),

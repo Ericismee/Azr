@@ -117,35 +117,59 @@ pub fn icon(px: u32, mode: u8, background: u8) -> Vec<u8> {
     }
     let mut pixels = vec![0; side * side * 4];
     for (i, pixel) in pixels.chunks_exact_mut(4).enumerate() {
-        let x = (i % side) as f32 / px as f32;
-        let y = (i / side) as f32 / px as f32;
-        let rgba = if mode == 1 {
-            if (x - 0.5).abs() > 0.024
-                && (y - 0.5).abs() > 0.024
-                && (0.13..0.87).contains(&x)
-                && (0.13..0.87).contains(&y)
-            {
-                [245, 158, 0, 255]
-            } else {
-                [0, 0, 0, 0]
+        let mut channels = [0u16; 4];
+        for (dx, dy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+            let x = ((i % side) as f32 + dx) / px as f32;
+            let y = ((i / side) as f32 + dy) / px as f32;
+            for (total, value) in channels.iter_mut().zip(launcher_pixel(mode, x, y)) {
+                *total += value as u16;
             }
-        } else {
-            // An original two-tone face, using the Finder palette.
-            let face = (x - 0.32).abs() < 0.026 && (0.28..0.39).contains(&y)
-                || (x - 0.68).abs() < 0.026 && (0.28..0.39).contains(&y)
-                || (0.28..0.73).contains(&x)
-                    && (y - (0.69 - 0.8 * (x - 0.5).powi(2))).abs() < 0.025;
-            if face {
-                [87, 42, 21, 255]
-            } else if x < 0.5 + (0.5 - y) * 0.2 {
-                [251, 153, 65, 255]
-            } else {
-                [255, 242, 216, 255]
-            }
-        };
-        pixel.copy_from_slice(&rgba);
+        }
+        for (channel, total) in pixel.iter_mut().zip(channels) {
+            *channel = (total / 4) as u8;
+        }
     }
     pixels
+}
+
+fn launcher_pixel(mode: u8, x: f32, y: f32) -> [u8; 4] {
+    let shine = (1.0 - y).powi(2);
+    if mode == 1 {
+        if (x - 0.5).abs() <= 0.025
+            || (y - 0.5).abs() <= 0.025
+            || !(0.13..0.87).contains(&x)
+            || !(0.13..0.87).contains(&y)
+        {
+            return [0; 4];
+        }
+        return [
+            250,
+            (119.0 + shine * 71.0) as u8,
+            (15.0 + shine * 62.0) as u8,
+            255,
+        ];
+    }
+    let left = x < 0.5 + (0.46 - y) * 0.17;
+    let eye =
+        (x - 0.29).hypot((y - 0.35) * 0.63) < 0.026 || (x - 0.70).hypot((y - 0.34) * 0.63) < 0.026;
+    let smile = (0.26..0.75).contains(&x) && (y - (0.67 - 0.79 * (x - 0.5).powi(2))).abs() < 0.019;
+    if eye || smile {
+        [108, 53, 25, 255]
+    } else if left {
+        [
+            252,
+            (145.0 + 66.0 * shine) as u8,
+            (62.0 + 116.0 * shine) as u8,
+            255,
+        ]
+    } else {
+        [
+            255,
+            (229.0 + 25.0 * shine) as u8,
+            (192.0 + 62.0 * shine) as u8,
+            255,
+        ]
+    }
 }
 
 fn input(vk: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {

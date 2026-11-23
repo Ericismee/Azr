@@ -1,18 +1,15 @@
 use crate::prefs;
 use azr_core::dock::ring::{next_in_ring, prev_in_ring};
 use azr_platform::log;
-use azr_platform::wins::{enumerate, focus, tracker};
+use azr_platform::wins::{enumerate, focus};
 use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT,
+    RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-const VK_BACKTICK: u32 = 0xC0;
-const ID_NEXT: i32 = 0xAB20;
-const ID_PREV: i32 = 0xAB21;
 const ID_HIDE: i32 = 0xAB22;
 const ID_MIN: i32 = 0xAB23;
 const ID_QUIT: i32 = 0xAB24;
@@ -39,7 +36,7 @@ pub fn cycle(back: bool) {
     if group.len() < 2 {
         return;
     }
-    group.sort_by_key(|h| std::cmp::Reverse(tracker::recent(*h)));
+    group.sort_unstable();
     let target = if back {
         prev_in_ring(&group, fg)
     } else {
@@ -109,8 +106,6 @@ fn register(hwnd: HWND) {
         if want && !have {
             let mut ok = 0;
             for (id, mods, vk) in [
-                (ID_NEXT, MOD_ALT, VK_BACKTICK),
-                (ID_PREV, MOD_ALT | MOD_SHIFT, VK_BACKTICK),
                 (ID_HIDE, MOD_CONTROL | MOD_ALT, 0x48),
                 (ID_MIN, MOD_CONTROL | MOD_ALT, 0x4D),
                 (ID_QUIT, MOD_CONTROL | MOD_ALT, 0x51),
@@ -126,7 +121,7 @@ fn register(hwnd: HWND) {
             }
             REGISTERED.store(ok > 0, std::sync::atomic::Ordering::Relaxed);
         } else if !want && have {
-            for id in [ID_NEXT, ID_PREV, ID_HIDE, ID_MIN, ID_QUIT] {
+            for id in [ID_HIDE, ID_MIN, ID_QUIT] {
                 let _ = UnregisterHotKey(Some(hwnd), id);
             }
             REGISTERED.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -169,7 +164,7 @@ pub fn shutdown() {
     let h = CTL.load(std::sync::atomic::Ordering::Relaxed);
     if h != 0 && REGISTERED.load(std::sync::atomic::Ordering::Relaxed) {
         unsafe {
-            for id in [ID_NEXT, ID_PREV, ID_HIDE, ID_MIN, ID_QUIT] {
+            for id in [ID_HIDE, ID_MIN, ID_QUIT] {
                 let _ = UnregisterHotKey(Some(HWND(h as *mut _)), id);
             }
         }
@@ -180,8 +175,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
     match msg {
         WM_HOTKEY => {
             match wp.0 as i32 {
-                ID_NEXT => cycle(false),
-                ID_PREV => cycle(true),
                 ID_HIDE => hide_foreground_app(),
                 ID_MIN => minimize_foreground(),
                 ID_QUIT => quit_foreground_app(),
