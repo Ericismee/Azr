@@ -15,7 +15,7 @@
 
 Azr là ứng dụng tùy biến giao diện dành cho **Windows 11**, lấy cảm hứng từ macOS. Ứng dụng bổ sung Dock, Dynamic Island, thanh menu, bảng điều khiển nhanh và widget, đồng thời cho phép điều chỉnh giao diện theo nhu cầu sử dụng. Azr hỗ trợ tiếng Việt và tiếng Anh.
 
-**[Tải bản mới nhất](https://github.com/Ericismee/Azr/releases/latest)** · [Ảnh giao diện](#ảnh-giao-diện) · [English](README.md)
+**[Tải bản mới nhất](https://github.com/Ericismee/Azr/releases/latest)** · [Ảnh giao diện](#ảnh-giao-diện) · [English](README.md) · [Khoe desktop của bạn](https://github.com/Ericismee/Azr/discussions/3)
 
 ![Giao diện Azr trên Windows 11](docs/assets/desktop-user-vi.png)
 
@@ -65,7 +65,9 @@ Lời bài hát trực tuyến dùng dịch vụ bên ngoài. Chia sẻ tệp n�
 
 ## Phản hồi và đóng góp
 
-Bạn có thể báo lỗi hoặc đề xuất tính năng tại [Issues](https://github.com/Ericismee/Azr/issues). Huy hiệu sao, fork và biểu đồ bên dưới hiển thị hoạt động của dự án trên GitHub.
+Đăng ảnh và chia sẻ cách tùy biến trong mục [Khoe desktop Azr](https://github.com/Ericismee/Azr/discussions/3). Bạn có thể đặt câu hỏi và góp ý tại [Discussions](https://github.com/Ericismee/Azr/discussions) hoặc mở [Issue](https://github.com/Ericismee/Azr/issues) để báo lỗi có thể tái hiện.
+
+Nếu bạn thích dùng Azr, hãy tặng repo một sao để dễ tìm lại trên GitHub.
 
 [![Lịch sử sao](https://api.star-history.com/svg?repos=Ericismee/Azr&type=Date)](https://www.star-history.com/#Ericismee/Azr&Date)
 

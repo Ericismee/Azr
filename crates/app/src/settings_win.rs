@@ -161,6 +161,8 @@ enum Action {
     Close,
     Minimize,
     ProjectRepo,
+    ProjectReleases,
+    ProjectCommunity,
     ProjectSupport,
     MainDisplay(u8),
     Takeover,
@@ -235,6 +237,7 @@ enum RowDef {
     Pick(&'static str, String, Action),
     Info(&'static str, &'static str),
     Brand,
+    ProjectLink(&'static str, &'static str, &'static str, Action),
     Corners([azr_core::settings::HotAction; 4]),
     Swatches(&'static str, usize),
     Thumbs(&'static str, Vec<(&'static str, Thumb, Action)>, usize),
@@ -272,6 +275,7 @@ fn row_label(r: &RowDef) -> &'static str {
         | RowDef::Slider(l, ..)
         | RowDef::Info(l, ..)
         | RowDef::Pick(l, ..)
+        | RowDef::ProjectLink(l, ..)
         | RowDef::Swatches(l, ..)
         | RowDef::Thumbs(l, ..)
         | RowDef::Text(l, ..) => l,
@@ -895,7 +899,9 @@ impl Win {
                 22.0
             }
             RowDef::Slider(..) => 30.0,
-            RowDef::Brand | RowDef::Corners(_) => 102.0,
+            RowDef::Brand => 116.0,
+            RowDef::Corners(_) => 102.0,
+            RowDef::ProjectLink(..) => 36.0,
             RowDef::Text(..) | RowDef::Pick(..) | RowDef::Info(..) => 30.0,
             RowDef::Seg(_, opts, _) => {
                 let widths: Vec<f32> = opts
@@ -929,7 +935,10 @@ impl Win {
             RowDef::Swatches(..) => 50.0,
         };
         let label_height = lines.len() as f32 * 18.0;
-        let layout = if matches!(r, RowDef::Radios(..)) {
+        let layout = if matches!(
+            r,
+            RowDef::Brand | RowDef::ProjectLink(..) | RowDef::Radios(..)
+        ) {
             RowLayout {
                 label_y: 0.0,
                 label_h: 0.0,
@@ -982,7 +991,7 @@ impl Win {
             if index > 0 && !matches!(r, RowDef::Radios(..)) {
                 self.rect(c, lx, y, cw - 32.0 * d, 1.0, 0.0, col(look.fg, 28));
             }
-            if !matches!(r, RowDef::Radios(..)) {
+            if !matches!(r, RowDef::ProjectLink(..) | RowDef::Radios(..)) {
                 let limit = if matches!(r, RowDef::Slider(..)) {
                     inner - 64.0
                 } else if !m.stacked && matches!(r, RowDef::Toggle(..)) {
@@ -1359,7 +1368,7 @@ impl Win {
                     self.region(lx, cy, inner * d, 30.0 * d, Action::EditText(*field));
                 }
                 RowDef::Brand => {
-                    let size = (90.0 * d).round() as u32;
+                    let size = (65.0 * d).round() as u32;
                     let key = format!("about-logo-{size}");
                     let surface = self.thumbs.get(&key).cloned().or_else(|| {
                         let image = crate::menulogo::original_bitmap(size)?;
@@ -1375,15 +1384,64 @@ impl Win {
                     });
                     if let Some(surface) = surface {
                         let w = size as f32;
-                        self.sprite(
-                            c,
-                            &surface,
-                            lx + (inner * d - w) / 2.0,
-                            cy + (102.0 * d - w) / 2.0,
-                            w,
-                            w,
-                        );
+                        self.sprite(c, &surface, lx + (inner * d - w) / 2.0, cy + 2.0 * d, w, w);
                     }
+                    let center = lx + inner * d / 2.0;
+                    self.text(c, "Azr", center, cy + 73.0 * d, 21.0, 700, look.fg, 1.0, 1);
+                    let version = format!(
+                        "{} {}  ·  Ericismee",
+                        prefs::tr("Version"),
+                        env!("CARGO_PKG_VERSION")
+                    );
+                    self.text(
+                        c,
+                        &version,
+                        center,
+                        cy + 103.0 * d,
+                        12.0,
+                        500,
+                        look.fg,
+                        0.74,
+                        1,
+                    );
+                }
+                RowDef::ProjectLink(title, subtitle, glyph, action) => {
+                    let primary = matches!(action, Action::ProjectRepo | Action::ProjectSupport);
+                    let tile = if primary { accent } else { look.fg };
+                    self.rect(
+                        c,
+                        lx,
+                        cy,
+                        34.0 * d,
+                        34.0 * d,
+                        10.0 * d,
+                        col(tile, if primary { 230 } else { 28 }),
+                    );
+                    self.glyph_icon(
+                        c,
+                        glyph,
+                        lx + 17.0 * d,
+                        cy + 17.0 * d,
+                        14.0,
+                        if primary { [255; 3] } else { look.fg },
+                    );
+                    let text_x = lx + 47.0 * d;
+                    let text_w = (inner - 78.0) * d;
+                    self.text_fit(c, title, text_x, cy, text_w, 13.5, 650, look.fg, 1.0, 0);
+                    self.text_fit(
+                        c,
+                        subtitle,
+                        text_x,
+                        cy + 20.0 * d,
+                        text_w,
+                        11.5,
+                        400,
+                        look.fg,
+                        0.72,
+                        0,
+                    );
+                    self.glyph_icon(c, "\u{E8A7}", rx - 8.0 * d, cy + 17.0 * d, 12.0, accent);
+                    self.region(lx, y, inner * d, rh, *action);
                 }
                 RowDef::Corners(actions) => {
                     let w = 174.0 * d;
@@ -2136,24 +2194,36 @@ impl Win {
                 ],
             )],
             9 => vec![
+                (None, vec![RowDef::Brand]),
                 (
-                    Some(prefs::tr("About Azr")),
+                    Some("GitHub"),
                     vec![
-                        RowDef::Brand,
-                        RowDef::Info(prefs::tr("Version"), env!("CARGO_PKG_VERSION")),
-                        RowDef::Info(prefs::tr("Developer"), "Ericismee"),
-                        RowDef::Pick(
-                            prefs::tr("Source repository"),
-                            "GitHub - Ericismee/Azr".into(),
+                        RowDef::ProjectLink(
+                            prefs::tr("Open Azr on GitHub"),
+                            prefs::tr("Ericismee/Azr · Star the project if you enjoy Azr"),
+                            "\u{E734}",
                             Action::ProjectRepo,
+                        ),
+                        RowDef::ProjectLink(
+                            prefs::tr("View releases"),
+                            prefs::tr("See what's new and download updates"),
+                            "\u{E896}",
+                            Action::ProjectReleases,
+                        ),
+                        RowDef::ProjectLink(
+                            prefs::tr("Share your desktop"),
+                            prefs::tr("See what others made and join the conversation"),
+                            "\u{E902}",
+                            Action::ProjectCommunity,
                         ),
                     ],
                 ),
                 (
                     Some(prefs::tr("Support the developer")),
-                    vec![RowDef::Pick(
-                        prefs::tr("Support Azr"),
-                        prefs::tr("Open support website").into(),
+                    vec![RowDef::ProjectLink(
+                        prefs::tr("Open support website"),
+                        "ericismee.github.io/Azr",
+                        "\u{EB51}",
                         Action::ProjectSupport,
                     )],
                 ),
@@ -3042,6 +3112,12 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Action::MainDisplay(id)) => prefs::update(|s| s.main_display = id),
                 Some(Action::ProjectRepo) => {
                     azr_platform::launch::open("https://github.com/Ericismee/Azr")
+                }
+                Some(Action::ProjectReleases) => {
+                    azr_platform::launch::open("https://github.com/Ericismee/Azr/releases/latest")
+                }
+                Some(Action::ProjectCommunity) => {
+                    azr_platform::launch::open("https://github.com/Ericismee/Azr/discussions/3")
                 }
                 Some(Action::ProjectSupport) => {
                     azr_platform::launch::open("https://ericismee.github.io/Azr/")

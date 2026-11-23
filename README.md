@@ -15,7 +15,7 @@
 
 Azr is a desktop customization app for **Windows 11**, inspired by macOS. It adds a Dock, Dynamic Island, menu bar, quick controls, and desktop widgets, with appearance settings you can adjust to suit your workflow. Available in English and Vietnamese.
 
-**[Download the latest release](https://github.com/Ericismee/Azr/releases/latest)** · [Screenshots](#screenshots) · [Tiếng Việt](README.vi.md)
+**[Download the latest release](https://github.com/Ericismee/Azr/releases/latest)** · [Share your desktop](https://github.com/Ericismee/Azr/discussions/3) · [Screenshots](#screenshots) · [Tiếng Việt](README.vi.md)
 
 ![Azr on Windows 11](docs/assets/desktop-user-en.png)
 
@@ -64,7 +64,9 @@ Online lyrics use an external service. Local file sharing uses unencrypted HTTP 
 
 ## Feedback and contributions
 
-Report bugs or suggest features through [Issues](https://github.com/Ericismee/Azr/issues). The star and fork badges and the chart below reflect the project’s activity on GitHub.
+Share a screenshot and your favorite settings in the [Desktop Showcase](https://github.com/Ericismee/Azr/discussions/3). Join [Discussions](https://github.com/Ericismee/Azr/discussions) for questions and ideas, or open an [Issue](https://github.com/Ericismee/Azr/issues) to report a reproducible bug.
+
+If Azr has earned a place on your desktop, consider starring the repository so you can find it again.
 
 [![Star history](https://api.star-history.com/svg?repos=Ericismee/Azr&type=Date)](https://www.star-history.com/#Ericismee/Azr&Date)
 
