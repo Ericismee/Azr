@@ -417,6 +417,9 @@ pub fn toggle() {
 }
 
 pub fn toggle_mode(mode: Mode) {
+    if crate::fullscreen::active() {
+        return;
+    }
     let open_mode = SPOT.with(|c| c.borrow().as_ref().map(|s| s.mode));
     match open_mode {
         Some(m) if m == mode => {

@@ -88,7 +88,7 @@ fn apply() {
                     if i < 2 { 0 } else { sh - 3 },
                 );
                 s.place(x, y, 3, 3);
-                s.set_visible(true);
+                s.set_visible(!crate::fullscreen::active());
             }
         }
     });
@@ -109,7 +109,7 @@ fn run(a: HotAction) {
 
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
-        prefs::WM_PREFS => {
+        prefs::WM_PREFS | crate::fullscreen::WM_FULLSCREEN => {
             apply();
             LRESULT(0)
         }
@@ -128,7 +128,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             let _ = KillTimer(Some(hwnd), wp.0);
             let down = GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0
                 || GetAsyncKeyState(VK_RBUTTON.0 as i32) < 0;
-            if !down && !overlap::primary_fullscreen(focus::foreground()) {
+            if !down
+                && !crate::fullscreen::active()
+                && !overlap::primary_fullscreen(focus::foreground())
+            {
                 run(prefs::get().hot[i]);
             }
             LRESULT(0)

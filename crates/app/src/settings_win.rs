@@ -142,7 +142,6 @@ enum Action {
     IconPack,
     DownloadsStack,
     RecentApps,
-    AboveFull,
     ClipHistory,
     MacKeys,
     Accent(u8),
@@ -1453,11 +1452,6 @@ impl Win {
                             prefs::tr("Hide desktop icons while Azr runs"),
                             s.hide_desktop_icons,
                             Action::HideIcons,
-                        ),
-                        RowDef::Toggle(
-                            prefs::tr("Always on top of full-screen windows"),
-                            s.above_fullscreen,
-                            Action::AboveFull,
                         ),
                         RowDef::Toggle(
                             prefs::tr("Quick shortcuts (Alt+` switches app windows)"),
@@ -2984,9 +2978,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Action::IconTint(i)) => prefs::update(|s| s.icon_tint = i),
                 Some(Action::ClipHistory) => {
                     prefs::update(|s| s.clipboard_history = !s.clipboard_history)
-                }
-                Some(Action::AboveFull) => {
-                    prefs::update(|s| s.above_fullscreen = !s.above_fullscreen)
                 }
                 Some(Action::MacIconCorners) => prefs::update(|s| {
                     s.icon_round = 75;

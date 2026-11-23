@@ -544,7 +544,9 @@ impl Mgr {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
         }
-        popup.show();
+        if !crate::fullscreen::active() {
+            popup.show();
+        }
         self.list.push(Widget {
             kind,
             popup,
@@ -1277,6 +1279,9 @@ impl Mgr {
     }
 
     fn tick(&mut self) {
+        if crate::fullscreen::active() {
+            return;
+        }
         self.ticks = self.ticks.wrapping_add(1);
         if self.ticks % 2 == 0 {
             if let (Some(prev), Some(now)) = (self.cpu_prev, sys::cpu_times()) {
@@ -1647,6 +1652,9 @@ impl Mgr {
     }
 
     fn open_gallery(&mut self) {
+        if crate::fullscreen::active() {
+            return;
+        }
         if self.gallery.is_some() {
             return;
         }
@@ -2017,6 +2025,24 @@ fn xy(lp: LPARAM) -> (f32, f32) {
 
 unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
+        crate::fullscreen::WM_FULLSCREEN => {
+            with(|m| {
+                let active = crate::fullscreen::active();
+                if active {
+                    m.close_gallery();
+                    m.finish_close_gallery();
+                    m.hide_slot();
+                }
+                for widget in &m.list {
+                    if active {
+                        widget.popup.hide();
+                    } else {
+                        widget.popup.show();
+                    }
+                }
+            });
+            LRESULT(0)
+        }
         WM_TIMER => {
             match wp.0 {
                 T_TICK => {

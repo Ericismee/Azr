@@ -2108,12 +2108,7 @@ impl Notch {
                     self.hwnd,
                     self.pill_screen_rect(),
                 );
-                if ov.fullscreen && crate::prefs::get().above_fullscreen {
-                    ov = overlap::Overlap {
-                        overlapped: false,
-                        fullscreen: false,
-                    };
-                }
+                ov.fullscreen |= crate::fullscreen::active();
                 if ov != self.overlap {
                     let was_fullscreen = self.overlap.fullscreen;
                     self.overlap = ov;
@@ -2355,6 +2350,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_TIMER => {
             with(hwnd, |d| d.on_timer(wp.0));
+            LRESULT(0)
+        }
+        crate::fullscreen::WM_FULLSCREEN => {
+            with(hwnd, |d| d.on_timer(T_WINCHG));
             LRESULT(0)
         }
         crate::prefs::WM_PREFS => {

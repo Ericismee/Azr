@@ -145,6 +145,7 @@ impl Hud {
                     | STRIP_R_ENTER
                     | STRIP_R_LEAVE
                     | WM_DISPLAYCHANGE
+                    | crate::fullscreen::WM_FULLSCREEN
                     | crate::prefs::WM_PREFS => {
                         let p = GetWindowLongPtrW(h, GWLP_USERDATA) as *mut Hud;
                         if !p.is_null() {
@@ -481,7 +482,10 @@ impl Hud {
     }
 
     fn show(&mut self, i: usize) {
-        if !ENABLED.load(Ordering::Relaxed) || Self::value_of(self.bars[i].kind).is_none() {
+        if crate::fullscreen::active()
+            || !ENABLED.load(Ordering::Relaxed)
+            || Self::value_of(self.bars[i].kind).is_none()
+        {
             return;
         }
         self.update_title(i);
@@ -572,6 +576,16 @@ impl Hud {
 
     fn on_message(&mut self, m: u32, w: WPARAM, l: LPARAM) {
         match m {
+            crate::fullscreen::WM_FULLSCREEN => {
+                if crate::fullscreen::active() {
+                    self.dragging = None;
+                    for bar in &mut self.bars {
+                        bar.shown = false;
+                        bar.popup.hide();
+                    }
+                }
+            }
+            WM_VOLUME | WM_BRIGHT if crate::fullscreen::active() => {}
             WM_VOLUME => {
                 if ENABLED.load(Ordering::Relaxed) {
                     osd::hide_native();

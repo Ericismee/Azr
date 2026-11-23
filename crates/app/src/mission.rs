@@ -147,6 +147,9 @@ pub fn toggle() {
 }
 
 pub fn show() {
+    if crate::fullscreen::active() {
+        return;
+    }
     if MC.with(|c| c.borrow().is_some()) {
         return;
     }

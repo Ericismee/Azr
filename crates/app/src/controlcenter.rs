@@ -249,6 +249,9 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
 }
 
 pub fn toggle(top: i32) {
+    if crate::fullscreen::active() {
+        return;
+    }
     let open = with(|c| c.panel.is_some() && !c.closing).unwrap_or(false);
     if open {
         close();

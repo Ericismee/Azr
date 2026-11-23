@@ -55,11 +55,12 @@ fn frame_rect(h: HWND) -> Option<RECT> {
 }
 
 fn covers_monitor(frame: RECT, monitor: RECT, maximized: bool, captioned: bool) -> bool {
+    const BORDER_TOLERANCE: i32 = 8;
     !(maximized && captioned)
-        && frame.left <= monitor.left
-        && frame.top <= monitor.top
-        && frame.right >= monitor.right
-        && frame.bottom >= monitor.bottom
+        && frame.left <= monitor.left + BORDER_TOLERANCE
+        && frame.top <= monitor.top + BORDER_TOLERANCE
+        && frame.right >= monitor.right - BORDER_TOLERANCE
+        && frame.bottom >= monitor.bottom - BORDER_TOLERANCE
 }
 
 struct Foreground {
@@ -84,9 +85,6 @@ fn on_monitor(fg: isize, monitor: HMONITOR) -> Option<Foreground> {
         if pid == std::process::id() || is_shell_class(&class_of(h)) {
             return None;
         }
-        if GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0 {
-            return None;
-        }
         let mut cloaked = 0u32;
         if DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut c_void, 4)
             .is_ok()
@@ -103,12 +101,20 @@ fn on_monitor(fg: isize, monitor: HMONITOR) -> Option<Foreground> {
         };
         let fullscreen = GetMonitorInfoW(monitor, &mut info).as_bool()
             && covers_monitor(frame, info.rcMonitor, maximized, captioned);
+        if !fullscreen && GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0 {
+            return None;
+        }
         Some(Foreground {
             frame,
             maximized,
             fullscreen,
         })
     }
+}
+
+pub fn foreground_fullscreen(fg: isize) -> bool {
+    let monitor = unsafe { MonitorFromWindow(HWND(fg as *mut _), MONITOR_DEFAULTTONULL) };
+    on_monitor(fg, monitor).is_some_and(|window| window.fullscreen)
 }
 
 pub fn primary_fullscreen(fg: isize) -> bool {
@@ -145,6 +151,29 @@ mod tests {
             right,
             bottom,
         }
+    }
+
+    #[test]
+    fn accepts_small_borderless_gaps_but_not_a_window_leaving_the_taskbar_space() {
+        let monitor = rect(-1920, 0, 0, 1080);
+        assert!(covers_monitor(
+            rect(-1918, 1, -3, 1077),
+            monitor,
+            false,
+            false
+        ));
+        assert!(!covers_monitor(
+            rect(-1920, 0, 0, 1040),
+            monitor,
+            false,
+            false
+        ));
+        assert!(!covers_monitor(
+            rect(-1918, 1, -3, 1077),
+            monitor,
+            true,
+            true
+        ));
     }
 
     #[test]

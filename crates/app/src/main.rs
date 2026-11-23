@@ -3,6 +3,7 @@
 mod controlcenter;
 mod display;
 mod dock;
+mod fullscreen;
 mod fx;
 mod hotcorners;
 mod hud;

@@ -422,6 +422,10 @@ fn create(comp: &Compositor) -> windows_core::Result<Box<Bar>> {
 
 unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
+        crate::fullscreen::WM_FULLSCREEN => {
+            with_bar(|bar| bar.check_fullscreen());
+            LRESULT(0)
+        }
         prefs::WM_PREFS => {
             apply_prefs();
             LRESULT(0)
@@ -649,8 +653,8 @@ impl Bar {
         if fg == 0 || fg == self.popup.hwnd.0 as isize {
             return;
         }
-        let full = !prefs::get().above_fullscreen
-            && azr_platform::wins::overlap::fullscreen_on(fg, self.popup.hwnd);
+        let full = crate::fullscreen::active()
+            || azr_platform::wins::overlap::fullscreen_on(fg, self.popup.hwnd);
         if full != self.fullscreen {
             self.fullscreen = full;
             if full {

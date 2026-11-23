@@ -27,6 +27,7 @@ pub fn request_quit() {
     }
 }
 const TIMER_EXIT: usize = 1;
+const TIMER_FULLSCREEN: usize = 2;
 
 static MAIN_WINDOW: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
@@ -60,6 +61,7 @@ pub fn create() -> windows::core::Result<HWND> {
             None,
         )?;
         MAIN_WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
+        SetTimer(Some(hwnd), TIMER_FULLSCREEN, 120, None);
         Ok(hwnd)
     }
 }
@@ -227,6 +229,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         single_instance::WM_WAKE => {
             azr_platform::log::line("instance", "peluncuran kedua terdeteksi");
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == TIMER_FULLSCREEN => {
+            crate::fullscreen::poll();
             LRESULT(0)
         }
         WM_TIMER if wp.0 == TIMER_EXIT => {

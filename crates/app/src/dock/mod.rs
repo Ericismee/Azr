@@ -815,13 +815,12 @@ impl Dock {
             self.hwnd,
             self.card_screen_rect(),
         );
+        if crate::fullscreen::active() {
+            self.overlap.fullscreen = true;
+        }
         if self.overlap.fullscreen {
-            if crate::prefs::get().above_fullscreen {
-                self.overlap = Overlap::default();
-            } else {
-                self.update_visibility();
-                return;
-            }
+            self.update_visibility();
+            return;
         }
         let wins = enumerate::list(std::process::id());
         tracker::prune(focus::is_alive);
@@ -1347,6 +1346,9 @@ impl Dock {
     }
 
     fn show_preview(&mut self) {
+        if crate::fullscreen::active() {
+            return;
+        }
         let Some(slot) = self.hover else { return };
         if self.dragging.is_some() {
             return;
@@ -1426,7 +1428,7 @@ impl Dock {
                     }
                 } else {
                     timer(self.hwnd, TIMER_TIP, 250);
-                    timer(self.hwnd, TIMER_PREVIEW, 450);
+                    timer(self.hwnd, TIMER_PREVIEW, 280);
                 }
             }
         }
@@ -2397,6 +2399,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_DROPFILES => {
             let h = windows::Win32::UI::Shell::HDROP(wp.0 as *mut _);
             with_dock(hwnd, |d| d.on_drop(h));
+            LRESULT(0)
+        }
+        crate::fullscreen::WM_FULLSCREEN => {
+            with_dock(hwnd, |d| d.refresh_windows());
             LRESULT(0)
         }
         crate::prefs::WM_PREFS => {

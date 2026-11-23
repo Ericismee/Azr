@@ -473,6 +473,9 @@ impl St {
     }
 
     fn refresh(&mut self) {
+        if crate::fullscreen::active() {
+            return;
+        }
         let now = std::time::Instant::now();
         if self.fly.is_some() || now < self.busy_until {
             let wait = self.busy_until.saturating_duration_since(now).as_millis() as u32 + 60;
@@ -1202,7 +1205,7 @@ impl St {
             e.place(if right { sw - ew } else { 0 }, 0, ew, sh);
             e.set_visible(true);
         }
-        let was_shown = strip.shown;
+        let was_shown = strip.shown && !crate::fullscreen::active();
         strip.hover = None;
         if was_shown {
             strip.popup.show();
@@ -1289,6 +1292,13 @@ impl St {
     }
 
     fn check_overlap(&mut self) {
+        if crate::fullscreen::active() {
+            if let Some(strip) = self.strip.as_mut() {
+                strip.shown = false;
+                strip.popup.hide();
+            }
+            return;
+        }
         let fg = focus::foreground();
         if fg == 0 || is_own(fg) || is_desktop(fg) {
             return;
@@ -1353,7 +1363,7 @@ impl St {
     }
 
     fn refresh_shots(&mut self, queue: bool) {
-        if self.strip.is_none() || self.fly.is_some() {
+        if crate::fullscreen::active() || self.strip.is_none() || self.fly.is_some() {
             return;
         }
         if self.shot_worker.is_none() {
@@ -1526,6 +1536,20 @@ fn gfx_dims(ar: Option<f32>, tw: f32, th_max: f32) -> (f32, f32) {
 
 unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
+        crate::fullscreen::WM_FULLSCREEN => {
+            with(|s| {
+                let active = crate::fullscreen::active();
+                if active {
+                    s.finish_fly();
+                    s.peek = false;
+                }
+                if let Some(edge) = &s.edge {
+                    edge.set_visible(!active);
+                }
+                s.check_overlap();
+            });
+            LRESULT(0)
+        }
         prefs::WM_PREFS => {
             sync();
             LRESULT(0)

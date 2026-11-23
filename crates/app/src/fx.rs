@@ -78,7 +78,7 @@ fn with_fx<R>(f: impl FnOnce(&mut Fx) -> R) -> Option<R> {
 
 fn enabled() -> bool {
     let p = prefs::get();
-    p.anim && p.min_effect < 2
+    !crate::fullscreen::active() && p.anim && p.min_effect < 2
 }
 
 fn genie_on() -> bool {
@@ -875,6 +875,10 @@ impl Fx {
     }
 
     fn update_shadow(&mut self, h: isize, full: bool) {
+        if crate::fullscreen::active() {
+            self.hide_shadow();
+            return;
+        }
         let p = prefs::get();
         if !p.win_shadow || h == 0 || !eligible(h) {
             self.hide_shadow();
@@ -1000,6 +1004,18 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_FX => {
             with_fx(|fx| fx.on_event(wp.0 as u32, lp.0));
+            LRESULT(0)
+        }
+        crate::fullscreen::WM_FULLSCREEN => {
+            with_fx(|fx| {
+                if crate::fullscreen::active() {
+                    fx.hide_shadow();
+                    fx.hide_overlay();
+                    fx.pending_restore = None;
+                } else {
+                    fx.apply_prefs();
+                }
+            });
             LRESULT(0)
         }
         prefs::WM_PREFS => {

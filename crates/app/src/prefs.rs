@@ -62,9 +62,13 @@ pub fn update_with(save: bool, f: impl FnOnce(&mut Settings)) {
 }
 
 pub fn broadcast() {
+    broadcast_message(WM_PREFS);
+}
+
+pub fn broadcast_message(message: u32) {
     for h in LISTENERS.lock().unwrap().iter() {
         unsafe {
-            let _ = PostMessageW(Some(HWND(*h as *mut _)), WM_PREFS, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(Some(HWND(*h as *mut _)), message, WPARAM(0), LPARAM(0));
         }
     }
 }

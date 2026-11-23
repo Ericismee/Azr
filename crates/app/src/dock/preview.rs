@@ -142,12 +142,27 @@ impl Preview {
         for (i, (hwnd, title, minimized)) in windows.iter().enumerate() {
             let x0 = pad + (i % cols) as i32 * (tw + pad);
             let row_y = pad + (i / cols) as i32 * stride;
-            let thumb = if *minimized {
-                None
-            } else {
-                thumbnail::register(self.popup.hwnd.0 as isize, *hwnd)
-            };
-            if *minimized {
+            let thumb = thumbnail::register(self.popup.hwnd.0 as isize, *hwnd).and_then(|handle| {
+                match thumbnail::source_size(handle) {
+                    Some((w, h)) if w > 0 && h > 0 => Some((handle, w, h)),
+                    _ => {
+                        thumbnail::unregister(handle);
+                        None
+                    }
+                }
+            });
+            let close_size = title_h.min(tw);
+            let title_y = row_y + th + gap;
+            let close_x = x0 + tw - close_size;
+            self.cells.push(Cell {
+                left: x0 - pad / 2,
+                right: x0 + tw + pad / 2,
+                top: row_y,
+                hwnd: *hwnd,
+                close: (close_x, title_y, close_size),
+                thumb: thumb.map(|(handle, _, _)| handle),
+            });
+            if *minimized || thumb.is_none() {
                 if let Some(s) = icon {
                     let sz = (64.0 * d) as i32;
                     let brush = comp.CreateSurfaceBrushWithSurface(s)?;
@@ -167,10 +182,7 @@ impl Preview {
                     self.popup.content.Children()?.InsertAtTop(&sprite)?;
                 }
             }
-            if let Some(t) = thumb {
-                let (sw, sh) = thumbnail::source_size(t)
-                    .filter(|s| s.0 > 0 && s.1 > 0)
-                    .unwrap_or((tw, th));
+            if let Some((t, sw, sh)) = thumb {
                 let k = (tw as f32 / sw as f32).min(th as f32 / sh as f32).min(1.0);
                 let (dw, dh) = (
                     ((sw as f32 * k) as i32).max(1),
@@ -179,8 +191,6 @@ impl Preview {
                 let (dx, dy) = (x0 + (tw - dw) / 2, row_y + (th - dh) / 2);
                 thumbnail::place(t, (dx, dy, dx + dw, dy + dh), 255);
             }
-            let close_size = title_h.min(tw);
-            let title_y = row_y + th + gap;
             let title_width = (tw - close_size - gap).max(1);
             if let Some(bmp) = render(title, &style, title_width, title_h) {
                 let surface = gfx.surface_from_bgra(bmp.w, bmp.h, &bmp.bgra)?;
@@ -199,7 +209,6 @@ impl Preview {
                 })?;
                 self.popup.content.Children()?.InsertAtTop(&sprite)?;
             }
-            let close_x = x0 + tw - close_size;
             let scale = close_size as f32;
             let center = scale / 2.0;
             let backdrop = comp.CreateSpriteVisual()?;
@@ -250,14 +259,6 @@ impl Preview {
                 })?;
                 self.popup.content.Children()?.InsertAtTop(&stroke)?;
             }
-            self.cells.push(Cell {
-                left: x0 - pad / 2,
-                right: x0 + tw + pad / 2,
-                top: row_y,
-                hwnd: *hwnd,
-                close: (close_x, title_y, close_size),
-                thumb,
-            });
         }
         self.popup.show();
         Ok(())
