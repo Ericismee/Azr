@@ -101,6 +101,19 @@ impl View {
     ) -> Result<View> {
         let mut v = View::base(comp, content, Kind::App { path }, icon_px, icon_px)?;
         let sprite = comp.CreateSpriteVisual()?;
+        let settings = crate::prefs::get();
+        let room = ((settings.dock_gap as f32 - 1.5) * dpi).max(0.0);
+        let growth = (room / (icon_px * (settings.dock_zoom as f32 / 100.0).max(1.0))).min(0.09);
+        sprite.SetCenterPoint(Vector3 {
+            X: icon_px / 2.0,
+            Y: icon_px / 2.0,
+            Z: 0.0,
+        })?;
+        sprite.SetScale(Vector3 {
+            X: 1.0 + growth,
+            Y: 1.0 + growth,
+            Z: 1.0,
+        })?;
         sprite.SetSize(Vector2 {
             X: icon_px,
             Y: icon_px,

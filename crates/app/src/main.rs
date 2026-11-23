@@ -18,6 +18,7 @@ mod netmenu;
 mod notch;
 mod paths;
 mod popup;
+mod power;
 mod prefs;
 mod services;
 mod settings_win;

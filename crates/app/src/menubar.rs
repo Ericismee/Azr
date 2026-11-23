@@ -1832,15 +1832,11 @@ impl Bar {
             108 => launch::task_manager(),
             105 => crate::launchpad::toggle(),
             106 => crate::mission::toggle(),
-            110 => confirm_power(
-                "Sleep now?",
-                "rundll32.exe",
-                "powrprof.dll,SetSuspendState 0,1,0",
-            ),
-            111 => confirm_power("Restart the computer now?", "shutdown.exe", "/r /t 0"),
-            112 => confirm_power("Shut down the computer now?", "shutdown.exe", "/s /t 0"),
+            110 => crate::power::request(&self.comp, crate::power::Action::Sleep),
+            111 => crate::power::request(&self.comp, crate::power::Action::Restart),
+            112 => crate::power::request(&self.comp, crate::power::Action::ShutDown),
             113 => launch::run("rundll32.exe", "user32.dll,LockWorkStation"),
-            114 => confirm_power("Sign out now?", "shutdown.exe", "/l"),
+            114 => crate::power::request(&self.comp, crate::power::Action::SignOut),
             800 | 801 => {
                 if let Some(rd) = &self.radios {
                     let (k, cur) = if cmd == 800 {
@@ -1928,22 +1924,6 @@ impl Bar {
             }
         }
     }
-}
-
-fn confirm_power(question: &'static str, file: &'static str, params: &'static str) {
-    let text = prefs::tr(question).to_string();
-    std::thread::spawn(move || unsafe {
-        use windows::core::HSTRING;
-        let r = MessageBoxW(
-            None,
-            &HSTRING::from(text),
-            w!("Azr"),
-            MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND,
-        );
-        if r == IDYES {
-            launch::run(file, params);
-        }
-    });
 }
 
 fn xy(lp: LPARAM) -> (f32, f32) {

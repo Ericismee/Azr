@@ -164,6 +164,7 @@ enum Action {
     ProjectSupport,
     MainDisplay(u8),
     Takeover,
+    QuickPower,
     Dock(Behavior),
     Notch(Behavior),
     Theme(Theme),
@@ -1524,6 +1525,11 @@ impl Win {
                             prefs::tr("Hide the Windows taskbar"),
                             s.takeover,
                             Action::Takeover,
+                        ),
+                        RowDef::Toggle(
+                            prefs::tr("Quick shutdown and restart"),
+                            s.quick_power_actions,
+                            Action::QuickPower,
                         ),
                         RowDef::Toggle(
                             prefs::tr("Hide desktop icons while Azr runs"),
@@ -3045,6 +3051,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 Some(Action::Close) => {
                     let _ = PostMessageW(Some(hwnd), WM_CLOSE_SELF, WPARAM(0), LPARAM(0));
+                }
+                Some(Action::QuickPower) => {
+                    prefs::update(|s| s.quick_power_actions = !s.quick_power_actions);
                 }
                 Some(Action::Takeover) => prefs::update(|s| s.takeover = !s.takeover),
                 Some(Action::Dock(b)) => prefs::update(|s| s.dock = b),

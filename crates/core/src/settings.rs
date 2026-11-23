@@ -283,6 +283,7 @@ impl std::fmt::Debug for ShortText {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub takeover: bool,
+    pub quick_power_actions: bool,
     pub dock: Behavior,
     pub notch: Behavior,
     pub blur: u8,
@@ -362,6 +363,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             takeover: false,
+            quick_power_actions: false,
             dock: Behavior::Smart,
             notch: Behavior::Fixed,
             blur: 100,
@@ -455,6 +457,9 @@ impl Settings {
             match k {
                 "launchpad_key" => {
                     s.launchpad_key = v.parse::<u8>().ok().filter(|n| *n <= 2).unwrap_or(0);
+                }
+                "quick_power_actions" => {
+                    s.quick_power_actions = parse_bool(v).unwrap_or(s.quick_power_actions);
                 }
                 "launchpad_icon" => {
                     s.launchpad_icon = v.parse::<u8>().ok().filter(|n| *n <= 3).unwrap_or(0);
@@ -903,6 +908,10 @@ impl Settings {
             self.launchpad_key, self.launchpad_icon
         ));
         text.push_str(&format!("main_display={}\n", self.main_display));
+        text.push_str(&format!(
+            "quick_power_actions={}\n",
+            self.quick_power_actions
+        ));
         text
     }
 }
@@ -1038,6 +1047,14 @@ pub fn bar_look(s: &Settings, system_dark: bool) -> Look {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn power_confirmation_defaults_on_and_persists_quick_mode() {
+        assert!(!Settings::parse("").quick_power_actions);
+        let quick = Settings::parse("quick_power_actions=true");
+        assert!(quick.quick_power_actions);
+        assert!(Settings::parse(&quick.serialize()).quick_power_actions);
+    }
+
     #[test]
     fn hardened_defaults_require_explicit_sensitive_features() {
         let s = super::Settings::default();

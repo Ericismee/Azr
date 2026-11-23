@@ -1,5 +1,5 @@
 mod body;
-mod draw;
+pub(crate) mod draw;
 mod drop;
 mod ears;
 mod shadow;
