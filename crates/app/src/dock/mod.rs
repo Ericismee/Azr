@@ -19,7 +19,9 @@ use azr_ui::gfx::Gfx;
 use azr_ui::glass::{GlassPanel, GlassParams, Tier};
 use azr_ui::host::{Host, Surface};
 use menu::{Menu, MENU_CLOSE, MENU_PICK};
-use preview::{Hit as PreviewHit, Preview, PREVIEW_CLICK, PREVIEW_ENTER, PREVIEW_LEAVE};
+use preview::{
+    Hit as PreviewHit, Preview, PREVIEW_CLICK, PREVIEW_ENTER, PREVIEW_LEAVE, PREVIEW_MOVE,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
@@ -62,6 +64,7 @@ const TIMER_REGION: usize = 109;
 const TIMER_RECONF: usize = 110;
 const TIMER_TRASH: usize = 111;
 const TIMER_REVEAL: usize = 112;
+const TIMER_PEEK: usize = 113;
 const TRASH_POLL_MS: u32 = 4000;
 const WM_DISPLAYCHANGE: u32 = 0x007E;
 const WM_DPICHANGED: u32 = 0x02E0;
@@ -1285,6 +1288,7 @@ impl Dock {
     }
 
     fn hide_popups(&mut self) {
+        kill(self.hwnd, TIMER_PEEK);
         kill(self.hwnd, TIMER_TIP);
         kill(self.hwnd, TIMER_PREVIEW);
         if let Some(t) = &self.tooltip {
@@ -2221,6 +2225,15 @@ impl Dock {
             }
             TIMER_TIP => self.show_tooltip(),
             TIMER_PREVIEW => self.show_preview(),
+            TIMER_PEEK => {
+                if !crate::fullscreen::active() {
+                    if let Some(preview) = &mut self.preview {
+                        if let Err(e) = preview.show_peek(&self.comp) {
+                            log::line("preview", &format!("peek: {e}"));
+                        }
+                    }
+                }
+            }
             TIMER_GRACE => {
                 self.grace = false;
                 self.update_visibility();
@@ -2430,9 +2443,28 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             });
             LRESULT(0)
         }
+        PREVIEW_MOVE => {
+            if let Some(arm) = with_dock(hwnd, |d| {
+                d.preview
+                    .as_mut()?
+                    .update_peek_target(lp.0 as i16 as i32, (lp.0 >> 16) as i16 as i32)
+            })
+            .flatten()
+            {
+                kill(hwnd, TIMER_PEEK);
+                if arm {
+                    timer(hwnd, TIMER_PEEK, 160);
+                }
+            }
+            LRESULT(0)
+        }
         PREVIEW_LEAVE => {
             with_dock(hwnd, |d| {
                 d.preview_hover = false;
+                kill(hwnd, TIMER_PEEK);
+                if let Some(preview) = &mut d.preview {
+                    preview.cancel_peek();
+                }
                 timer(hwnd, TIMER_PCLOSE, 200);
             });
             LRESULT(0)

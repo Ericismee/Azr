@@ -9,7 +9,7 @@
 [Setup]
 AppId={{B35F3A75-BE5C-4A91-9962-EAC9CC889BC3}
 AppName=Azr
-AppVersion=0.1.2
+AppVersion=0.1.3
 AppPublisher=Ericismee
 AppPublisherURL=https://github.com/Ericismee/Azr
 DefaultDirName={localappdata}\Programs\Azr
@@ -20,7 +20,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.22000
 OutputDir={#OutputPath}
-OutputBaseFilename=Azr-Setup-0.1.2-x64
+OutputBaseFilename=Azr-Setup-0.1.3-x64
 SetupIconFile=..\assets\azr.ico
 UninstallDisplayIcon={app}\azr.exe
 VersionInfoProductName=Azr

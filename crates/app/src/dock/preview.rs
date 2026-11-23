@@ -1,11 +1,12 @@
 use crate::popup::Popup;
 use azr_platform::text::{render, Style};
-use azr_platform::wins::thumbnail;
+use azr_platform::wins::{snapshot, thumbnail};
 use azr_ui::gfx::Gfx;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::{MonitorFromRect, MONITOR_DEFAULTTONULL};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetCapture, ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
 };
@@ -17,6 +18,7 @@ use windows_numerics::{Vector2, Vector3};
 pub const PREVIEW_CLICK: u32 = WM_APP + 7;
 pub const PREVIEW_ENTER: u32 = WM_APP + 8;
 pub const PREVIEW_LEAVE: u32 = WM_APP + 9;
+pub const PREVIEW_MOVE: u32 = WM_APP + 16;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
 static TARGET: AtomicIsize = AtomicIsize::new(0);
@@ -37,6 +39,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT
                 let _ = TrackMouseEvent(&mut t);
                 let _ = PostMessageW(Some(target), PREVIEW_ENTER, WPARAM(0), LPARAM(0));
             }
+            let _ = SendMessageW(target, PREVIEW_MOVE, Some(WPARAM(0)), Some(l));
             LRESULT(0)
         }
         WM_MOUSELEAVE => {
@@ -85,12 +88,103 @@ struct Cell {
     thumb: Option<isize>,
 }
 
+struct Peek {
+    popup: Popup,
+    thumbnail: Option<isize>,
+}
+
+unsafe extern "system" fn peek_proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+    match m {
+        WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        _ => DefWindowProcW(h, m, w, l),
+    }
+}
+
+impl Peek {
+    fn new(comp: &Compositor) -> Result<Self> {
+        let popup = Popup::new(
+            comp,
+            w!("AzrDockPeek"),
+            Some(peek_proc),
+            WS_EX_TRANSPARENT,
+            crate::prefs::glass((10.0, 10.0), 0.0, crate::prefs::Role::Dark),
+        )?;
+        Ok(Self {
+            popup,
+            thumbnail: None,
+        })
+    }
+
+    fn show(&mut self, source: isize, previews: HWND) -> Result<()> {
+        self.hide();
+        let window = HWND(source as *mut _);
+        // A minimized source may not have a composited frame. Keep its small preview.
+        if unsafe { !IsWindowVisible(window).as_bool() || IsIconic(window).as_bool() } {
+            return Ok(());
+        }
+        let Some((x, y, w, h)) = snapshot::frame_rect(source) else {
+            return Ok(());
+        };
+        if w <= 0 || h <= 0 {
+            return Ok(());
+        }
+        let rect = windows::Win32::Foundation::RECT {
+            left: x,
+            top: y,
+            right: x + w,
+            bottom: y + h,
+        };
+        if unsafe { MonitorFromRect(&rect, MONITOR_DEFAULTTONULL).is_invalid() } {
+            return Ok(());
+        }
+        self.popup.set_rect(x, y, w, h)?;
+        let Some(handle) = thumbnail::register(self.popup.hwnd.0 as isize, source) else {
+            return Ok(());
+        };
+        self.thumbnail = Some(handle);
+        if !thumbnail::place(handle, (0, 0, w, h), 255) {
+            self.hide();
+            return Ok(());
+        }
+        unsafe {
+            SetWindowPos(
+                self.popup.hwnd,
+                Some(previews),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )
+        }
+    }
+
+    fn hide(&mut self) {
+        self.popup.hide();
+        if let Some(handle) = self.thumbnail.take() {
+            thumbnail::unregister(handle);
+        }
+    }
+}
+
+impl Drop for Peek {
+    fn drop(&mut self) {
+        self.hide();
+        unsafe {
+            let _ = DestroyWindow(self.popup.hwnd);
+        }
+    }
+}
+
 pub struct Preview {
     popup: Popup,
     cells: Vec<Cell>,
     dpi: f32,
     bounds: (i32, i32, i32, i32),
     windows: Vec<(isize, String, bool)>,
+    peek: Option<Peek>,
+    pending_peek: Option<isize>,
 }
 
 impl Preview {
@@ -114,6 +208,8 @@ impl Preview {
             dpi,
             bounds,
             windows: Vec::new(),
+            peek: None,
+            pending_peek: None,
         })
     }
 
@@ -159,6 +255,7 @@ impl Preview {
         {
             return Ok(());
         }
+        self.cancel_peek();
         self.windows.clear();
         let mut retained = RetainedThumbnails::default();
         for cell in self.cells.drain(..) {
@@ -312,6 +409,36 @@ impl Preview {
         self.cells.iter().find_map(|cell| cell.hit(x, y))
     }
 
+    pub fn update_peek_target(&mut self, x: i32, y: i32) -> Option<bool> {
+        let target = self.cells.iter().find_map(|cell| cell.peek_target(x, y));
+        if target == self.pending_peek {
+            return None;
+        }
+        self.cancel_peek();
+        self.pending_peek = target;
+        Some(target.is_some())
+    }
+
+    pub fn show_peek(&mut self, comp: &Compositor) -> Result<()> {
+        let Some(target) = self.pending_peek.filter(|_| self.is_visible()) else {
+            return Ok(());
+        };
+        if self.peek.is_none() {
+            self.peek = Some(Peek::new(comp)?);
+        }
+        if let Some(peek) = &mut self.peek {
+            peek.show(target, self.popup.hwnd)?;
+        }
+        Ok(())
+    }
+
+    pub fn cancel_peek(&mut self) {
+        self.pending_peek = None;
+        if let Some(peek) = &mut self.peek {
+            peek.hide();
+        }
+    }
+
     fn clear(&mut self) {
         self.windows.clear();
         for c in self.cells.drain(..) {
@@ -325,9 +452,20 @@ impl Preview {
     }
 
     pub fn hide(&mut self) {
+        self.cancel_peek();
         if self.popup.is_visible() || !self.cells.is_empty() {
+            INSIDE.store(false, Ordering::Relaxed);
             self.clear();
             self.popup.hide();
+        }
+    }
+}
+
+impl Drop for Preview {
+    fn drop(&mut self) {
+        self.hide();
+        unsafe {
+            let _ = DestroyWindow(self.popup.hwnd);
         }
     }
 }
@@ -350,6 +488,13 @@ fn preview_grid(n: usize, width: i32, height: i32, dpi: f32) -> (usize, usize, i
 }
 
 impl Cell {
+    fn peek_target(&self, x: i32, y: i32) -> Option<isize> {
+        match self.hit(x, y) {
+            Some(Hit::Activate(hwnd)) => Some(hwnd),
+            _ => None,
+        }
+    }
+
     fn hit(&self, x: i32, y: i32) -> Option<Hit> {
         let (left, top, size) = self.close;
         if (left..left + size).contains(&x) && (top..top + size).contains(&y) {
@@ -365,6 +510,22 @@ impl Cell {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peek_targets_the_window_body_and_ignores_close_and_card_gaps() {
+        let cell = Cell {
+            left: 8,
+            right: 220,
+            top: 12,
+            hwnd: 17,
+            close: (180, 145, 26),
+            thumb: None,
+        };
+        assert_eq!(cell.peek_target(54, 120), Some(17));
+        assert_eq!(cell.peek_target(54, 150), Some(17));
+        assert_eq!(cell.peek_target(191, 150), None);
+        assert_eq!(cell.peek_target(54, 172), None);
+    }
 
     #[test]
     fn wraps_a_large_group_inside_a_narrow_monitor() {

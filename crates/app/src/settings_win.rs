@@ -13,7 +13,8 @@ use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+    GetKeyState, ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+    VK_CONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Color;
@@ -33,6 +34,52 @@ const CONTENT_W: f32 = W - SIDEBAR_W - 48.0;
 const VIEW_TOP: f32 = 56.0;
 const SIDE_INSET: f32 = 8.0;
 const SIDE_RADIUS: f32 = 18.0;
+const SIDE_TOP: f32 = 88.0;
+const SIDE_BOTTOM: f32 = H - 48.0;
+
+const PAGES: [(&str, &str, [u8; 3], u8); 10] = [
+    ("General", "\u{E713}", [142, 142, 147], 0),
+    ("Dock", "\u{E7C4}", [10, 132, 255], 1),
+    ("Dynamic Island", "\u{E7F4}", [58, 58, 60], 2),
+    ("Menu bar", "\u{E700}", [90, 200, 250], 3),
+    ("Appearance", "\u{E790}", [88, 86, 214], 4),
+    ("Window manager", "\u{E8A0}", [48, 209, 88], 5),
+    ("Screen Corners", "\u{E73F}", [175, 82, 222], 6),
+    ("Quick Search", "\u{E721}", [255, 149, 10], 7),
+    ("Widgets", "\u{E737}", [0, 122, 255], 8),
+    ("About & Support", "\u{E946}", [68, 110, 183], 9),
+];
+
+fn fold_search(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter_map(|ch| {
+            Some(match ch {
+                'à' | 'á' | 'ả' | 'ã' | 'ạ' | 'ă' | 'ằ' | 'ắ' | 'ẳ' | 'ẵ' | 'ặ' | 'â' | 'ầ'
+                | 'ấ' | 'ẩ' | 'ẫ' | 'ậ' => 'a',
+                'đ' => 'd',
+                'è' | 'é' | 'ẻ' | 'ẽ' | 'ẹ' | 'ê' | 'ề' | 'ế' | 'ể' | 'ễ' | 'ệ' => {
+                    'e'
+                }
+                'ì' | 'í' | 'ỉ' | 'ĩ' | 'ị' => 'i',
+                'ò' | 'ó' | 'ỏ' | 'õ' | 'ọ' | 'ô' | 'ồ' | 'ố' | 'ổ' | 'ỗ' | 'ộ' | 'ơ' | 'ờ'
+                | 'ớ' | 'ở' | 'ỡ' | 'ợ' => 'o',
+                'ù' | 'ú' | 'ủ' | 'ũ' | 'ụ' | 'ư' | 'ừ' | 'ứ' | 'ử' | 'ữ' | 'ự' => {
+                    'u'
+                }
+                'ỳ' | 'ý' | 'ỷ' | 'ỹ' | 'ỵ' => 'y',
+                '\u{0300}'..='\u{036f}' => return None,
+                _ => ch,
+            })
+        })
+        .collect()
+}
+
+fn search_matches(label: &str, query: &str) -> bool {
+    let label = fold_search(label);
+    query.split_whitespace().all(|word| label.contains(word))
+}
 
 fn side_glass(mut g: azr_ui::glass::GlassParams) -> azr_ui::glass::GlassParams {
     g.blur_sigma = g.blur_sigma.max(16.0);
@@ -112,6 +159,7 @@ enum Action {
     LyricsOnline,
     LyricsDir,
     Close,
+    Minimize,
     ProjectRepo,
     ProjectSupport,
     MainDisplay(u8),
@@ -150,6 +198,7 @@ enum Action {
     Back,
     Forward,
     Search,
+    ClearSearch,
     IconStyle(u8),
     IconTint(u8),
     NotchOn,
@@ -232,8 +281,8 @@ fn row_label(r: &RowDef) -> &'static str {
 fn user_name() -> String {
     std::env::var("USERNAME")
         .ok()
-        .filter(|u| !u.is_empty())
-        .unwrap_or_else(|| "Azr".to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "Azr".to_owned())
 }
 
 struct Win {
@@ -255,6 +304,7 @@ struct Win {
     tab: u8,
     scroll: f32,
     content_h: f32,
+    content_body: Option<ContainerVisual>,
     history: Vec<u8>,
     hpos: usize,
     search: String,
@@ -283,6 +333,10 @@ pub fn open(comp: &Compositor) {
                 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
+            if IsIconic(h).as_bool() {
+                let _ = ShowWindow(h, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(h);
         }
         return;
     }
@@ -336,12 +390,13 @@ fn fitted_dpi(hwnd: HWND) -> f32 {
 
 fn create(comp: &Compositor) -> windows_core::Result<()> {
     let glass = side_glass(prefs::glass((10.0, 10.0), SIDE_RADIUS, Role::Themed));
-    let mut popup = Popup::new(
+    let popup = Popup::new_with(
         comp,
         w!("AzrSettings"),
         Some(proc),
         WINDOW_EX_STYLE(0),
         glass,
+        true,
     )?;
     let dpi = fitted_dpi(popup.hwnd);
     let gfx = Gfx::shared(comp)?;
@@ -374,6 +429,7 @@ fn create(comp: &Compositor) -> windows_core::Result<()> {
         tab: 0,
         scroll: 0.0,
         content_h: 0.0,
+        content_body: None,
         history: vec![0],
         hpos: 0,
         search: String::new(),
@@ -397,9 +453,10 @@ fn create(comp: &Compositor) -> windows_core::Result<()> {
     );
     win.popup.set_rect(left, top, w, h)?;
     win.frame();
-    win.popup.show();
-    prefs::listen(win.popup.hwnd);
+    let hwnd = win.popup.hwnd;
+    prefs::listen(hwnd);
     WIN.with(|s| *s.borrow_mut() = Some(win));
+    with_win(|w| w.popup.show_active());
     Ok(())
 }
 
@@ -662,17 +719,37 @@ impl Win {
         self.render();
     }
 
-    fn page_matches(&self, idx: u8, name: &str) -> bool {
-        let q = self.search.trim().to_lowercase();
-        if q.is_empty() || name.to_lowercase().contains(&q) {
-            return true;
+    fn page_matches(&self, idx: u8, name: &'static str, query: &str) -> bool {
+        query.is_empty()
+            || search_matches(name, query)
+            || search_matches(prefs::tr(name), query)
+            || self.page(idx).iter().any(|(heading, rows)| {
+                heading.is_some_and(|h| search_matches(h, query))
+                    || rows.iter().any(|r| search_matches(row_label(r), query))
+            })
+    }
+
+    fn select_page(&mut self, page: u8) {
+        self.search.clear();
+        self.search_focus = false;
+        self.side_scroll = 0.0;
+        self.go(page, true);
+    }
+
+    fn scroll_content(&mut self, offset: f32) {
+        let viewport_h = (H - VIEW_TOP - 10.0) * self.dpi;
+        let next = offset.clamp(0.0, (self.content_h - viewport_h).max(0.0));
+        if next == self.scroll {
+            return;
         }
-        self.page(idx).iter().any(|(h, rows)| {
-            h.is_some_and(|h| h.to_lowercase().contains(&q))
-                || rows
-                    .iter()
-                    .any(|r| row_label(r).to_lowercase().contains(&q))
-        })
+        self.scroll = next;
+        if let Some(body) = &self.content_body {
+            let _ = body.SetOffset(Vector3 {
+                X: 0.0,
+                Y: -self.scroll,
+                Z: 0.0,
+            });
+        }
     }
 
     fn region(&mut self, x: f32, y: f32, w: f32, h: f32, a: Action) {
@@ -1453,30 +1530,29 @@ impl Win {
                             s.hide_desktop_icons,
                             Action::HideIcons,
                         ),
-                        RowDef::Toggle(
-                            prefs::tr("Quick shortcuts (Alt+` switches app windows)"),
-                            s.mac_shortcuts,
-                            Action::MacKeys,
-                        ),
                     ],
                 ),
                 (Some(prefs::tr("Display")), {
+                    let selected = crate::display::selected().id;
                     let mut rows = vec![RowDef::Pick(
                         prefs::tr("Azr main display"),
                         if s.main_display == 0 {
-                            prefs::tr("Windows main display").to_owned()
+                            format!("✓ {}", prefs::tr("Windows main display"))
                         } else {
-                            format!("{} {}", prefs::tr("Display"), s.main_display)
+                            prefs::tr("Windows main display").to_owned()
                         },
                         Action::MainDisplay(0),
                     )];
-                    let selected = crate::display::selected().id;
                     rows.extend(crate::display::list().into_iter().map(|display| {
                         let (w, h) = display.size();
-                        let active = display.id == selected;
+                        let active = s.main_display != 0 && display.id == selected;
                         let marker = if active { "✓ " } else { "" };
                         RowDef::Pick(
-                            prefs::tr("Move Azr to this display"),
+                            prefs::tr(if display.primary {
+                                "Windows primary"
+                            } else {
+                                "Secondary display"
+                            }),
                             format!(
                                 "{marker}{} {} · {w} × {h}",
                                 prefs::tr("Display"),
@@ -1488,8 +1564,13 @@ impl Win {
                     rows
                 }),
                 (
-                    Some("Launchpad"),
+                    Some(prefs::tr("Shortcuts and Launchpad")),
                     vec![
+                        RowDef::Toggle(
+                            prefs::tr("Switch app windows with Alt+`"),
+                            s.mac_shortcuts,
+                            Action::MacKeys,
+                        ),
                         RowDef::Seg(
                             prefs::tr("Launchpad shortcut"),
                             vec![
@@ -1542,7 +1623,11 @@ impl Win {
                     None,
                     vec![
                         RowDef::Toggle(prefs::tr("Enable Dock"), s.dock_enabled, Action::DockOn),
-                        RowDef::Seg(prefs::tr("Behavior"), behaviors(true), beh_idx(s.dock)),
+                        RowDef::Seg(
+                            prefs::tr("When to show Dock"),
+                            behaviors(true),
+                            beh_idx(s.dock),
+                        ),
                         RowDef::Seg(
                             prefs::tr("Minimize effect"),
                             vec![
@@ -2086,6 +2171,7 @@ impl Win {
             self.side_scroll *= ratio;
             self.dpi = new_dpi;
         }
+        self.content_body = None;
         let content = self.popup.content.clone();
         if let Ok(k) = content.Children() {
             let _ = k.RemoveAll();
@@ -2110,7 +2196,19 @@ impl Win {
                 col(*rgb, 255),
             );
         }
-        self.region_fixed(18.0 * d, 17.0 * d, 20.0 * d, 20.0 * d, Action::Close);
+        self.region_fixed(18.0 * d, 17.0 * d, 17.0 * d, 20.0 * d, Action::Close);
+        self.region_fixed(37.0 * d, 17.0 * d, 17.0 * d, 20.0 * d, Action::Minimize);
+        self.text(
+            c,
+            prefs::tr("Settings"),
+            84.0 * d,
+            19.0 * d,
+            13.0,
+            700,
+            look.fg,
+            0.94,
+            0,
+        );
 
         let (fx, fy, fw, fh) = (16.0 * d, 48.0 * d, (SIDEBAR_W - 32.0) * d, 30.0 * d);
         self.rect(
@@ -2124,7 +2222,7 @@ impl Win {
         );
         self.glyph_icon(c, "\u{E721}", fx + 15.0 * d, fy + fh / 2.0, 11.0, look.fg);
         let (shown, op) = if self.search.is_empty() && !self.search_focus {
-            (prefs::tr("Search").to_string(), 0.45)
+            (prefs::tr("Search settings").to_string(), 0.45)
         } else {
             (
                 format!(
@@ -2140,7 +2238,11 @@ impl Win {
             &shown,
             fx + 29.0 * d,
             fy + (fh - 17.0 * d) / 2.0,
-            fw - 40.0 * d,
+            fw - if self.search.is_empty() {
+                38.0 * d
+            } else {
+                58.0 * d
+            },
             13.0,
             400,
             look.fg,
@@ -2149,60 +2251,23 @@ impl Win {
         );
         self.region_fixed(fx, fy, fw, fh, Action::Search);
 
-        let (px0, py0, av) = (20.0 * d, 90.0 * d, 38.0 * d);
-        self.rect(c, px0, py0, av, av, av / 2.0, crate::prefs::accent_c(255));
-        let user = user_name();
-        let initial: String = user.chars().take(1).collect::<String>().to_uppercase();
-        self.text(
-            c,
-            &initial,
-            px0 + av / 2.0,
-            py0 + (av - 20.0 * d) / 2.0,
-            15.0,
-            600,
-            [255, 255, 255],
-            1.0,
-            1,
-        );
-        self.text_fit(
-            c,
-            &user,
-            px0 + av + 10.0 * d,
-            py0 + 2.0 * d,
-            (SIDEBAR_W - 90.0) * d,
-            13.5,
-            600,
-            look.fg,
-            0.95,
-            0,
-        );
-        self.text(
-            c,
-            prefs::tr("Windows Account"),
-            px0 + av + 10.0 * d,
-            py0 + 20.0 * d,
-            11.0,
-            400,
-            look.fg,
-            0.6,
-            0,
-        );
+        if !self.search.is_empty() {
+            let clear_x = fx + fw - 24.0 * d;
+            self.glyph_icon(
+                c,
+                "\u{E711}",
+                clear_x + 9.0 * d,
+                fy + fh / 2.0,
+                9.0,
+                look.fg,
+            );
+            self.region_fixed(clear_x, fy, 24.0 * d, fh, Action::ClearSearch);
+        }
 
-        let pages: [(&'static str, &'static str, [u8; 3], u8); 10] = [
-            (prefs::tr("General"), "\u{E713}", [142, 142, 147], 0),
-            (prefs::tr("Dock"), "\u{E7C4}", [10, 132, 255], 1),
-            (prefs::tr("Dynamic Island"), "\u{E7F4}", [58, 58, 60], 2),
-            (prefs::tr("Menu bar"), "\u{E700}", [90, 200, 250], 3),
-            (prefs::tr("Appearance"), "\u{E790}", [88, 86, 214], 4),
-            (prefs::tr("Window manager"), "\u{E8A0}", [48, 209, 88], 5),
-            (prefs::tr("Screen Corners"), "\u{E73F}", [175, 82, 222], 6),
-            (prefs::tr("Quick Search"), "\u{E721}", [255, 149, 10], 7),
-            (prefs::tr("Widgets"), "\u{E737}", [0, 122, 255], 8),
-            (prefs::tr("About & Support"), "\u{E946}", [68, 110, 183], 9),
-        ];
-        let mut sy = 140.0 * d;
+        let query = fold_search(self.search.trim());
+        let mut sy = (SIDE_TOP + 4.0) * d;
         self.side.clear();
-        let (view_top, view_bot) = (134.0 * d, (H - 96.0) * d);
+        let (view_top, view_bot) = (SIDE_TOP * d, SIDE_BOTTOM * d);
         let side_body = match (
             self.comp.CreateContainerVisual(),
             self.comp.CreateContainerVisual(),
@@ -2232,8 +2297,8 @@ impl Win {
             _ => c.clone(),
         };
         let parent = &side_body;
-        for (name, glyph, color, idx) in pages {
-            if !self.page_matches(idx, name) {
+        for (name, glyph, color, idx) in PAGES {
+            if !self.page_matches(idx, name, &query) {
                 continue;
             }
             let sel = idx == self.tab;
@@ -2276,12 +2341,13 @@ impl Win {
                 13.0,
                 [255, 255, 255],
             );
-            self.text(
+            self.text_fit(
                 c,
-                name,
+                prefs::tr(name),
                 rx + 42.0 * d,
                 sy + (rh - 17.0 * d) / 2.0,
-                13.5,
+                rw - 50.0 * d,
+                13.0,
                 if sel { 600 } else { 400 },
                 if sel { [255, 255, 255] } else { look.fg },
                 1.0,
@@ -2293,6 +2359,20 @@ impl Win {
                 self.region_fixed(rx, vis_top, rw, vis_bot - vis_top, Action::Tab(idx));
             }
             sy += 40.0 * d;
+        }
+        if self.side.is_empty() {
+            self.text_fit(
+                c,
+                prefs::tr("No matching settings"),
+                20.0 * d,
+                sy + 8.0 * d,
+                (SIDEBAR_W - 40.0) * d,
+                12.0,
+                500,
+                look.fg,
+                0.70,
+                0,
+            );
         }
         let side_max = (sy - 4.0 * d - view_bot).max(0.0);
         self.side_view = (view_top, side_max);
@@ -2326,7 +2406,7 @@ impl Win {
             c,
             "Azr",
             SIDEBAR_W * d / 2.0,
-            (H - 42.0) * d,
+            (H - 39.0) * d,
             12.0,
             600,
             look.fg,
@@ -2392,10 +2472,10 @@ impl Win {
         );
         self.region_fixed(bx, by, bw / 2.0, bh, Action::Back);
         self.region_fixed(bx + bw / 2.0, by, bw / 2.0, bh, Action::Forward);
-        let title = pages
+        let title = PAGES
             .iter()
             .find(|p| p.3 == self.tab)
-            .map(|p| p.0)
+            .map(|p| prefs::tr(p.0))
             .unwrap_or("");
         self.text(
             c,
@@ -2460,15 +2540,8 @@ impl Win {
             y += used + 20.0 * d;
         }
         self.content_h = y + 6.0 * d;
-        let max_scroll = (self.content_h - vh).max(0.0);
-        if self.scroll > max_scroll {
-            self.scroll = max_scroll;
-            let _ = body.SetOffset(Vector3 {
-                X: 0.0,
-                Y: -self.scroll,
-                Z: 0.0,
-            });
-        }
+        self.content_body = Some(body);
+        self.scroll_content(self.scroll);
         self.size = (W * d, H * d);
         let (x, yy, ww, hh) = self.popup.rect;
         let (nw, nh) = ((W * d) as i32, (H * d) as i32);
@@ -2630,7 +2703,6 @@ fn with_win<R>(f: impl FnOnce(&mut Win) -> R) -> Option<R> {
 
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
-        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_NCHITTEST => {
             let mut r = windows::Win32::Foundation::RECT::default();
             let _ = GetWindowRect(hwnd, &mut r);
@@ -2646,18 +2718,17 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             let delta = ((wp.0 >> 16) as i16) as f32;
             with_win(|w| {
                 let d = w.dpi;
-                let vh = (H - VIEW_TOP - 10.0) * d;
-                let mut p = windows::Win32::Foundation::POINT::default();
-                let _ = GetCursorPos(&mut p);
-                if ((p.x - w.popup.rect.0) as f32) < SIDEBAR_W * d {
+                let (screen_x, _) = xy(lp);
+                if screen_x - (w.popup.rect.0 as f32) < SIDEBAR_W * d {
                     let max = w.side_view.1;
-                    w.side_scroll = (w.side_scroll - delta / 120.0 * 40.0 * d).clamp(0.0, max);
-                    w.render();
+                    let next = (w.side_scroll - delta / 120.0 * 40.0 * d).clamp(0.0, max);
+                    if next != w.side_scroll {
+                        w.side_scroll = next;
+                        w.render();
+                    }
                     return;
                 }
-                let max = (w.content_h - vh).max(0.0);
-                w.scroll = (w.scroll - delta / 120.0 * 48.0 * d).clamp(0.0, max);
-                w.render();
+                w.scroll_content(w.scroll - delta / 120.0 * 48.0 * d);
             });
             LRESULT(0)
         }
@@ -2729,7 +2800,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 };
                 let _ = TrackMouseEvent(&mut t);
                 let (top, s) = (w.side_view.0, w.side_scroll);
-                let hit = if y < top || y > (H - 96.0) * w.dpi {
+                let hit = if y < top || y > SIDE_BOTTOM * w.dpi {
                     None
                 } else {
                     w.side
@@ -2759,7 +2830,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     }
                     return;
                 }
-                if w.search_focus && ch >= 32 && ch != 127 {
+                if w.search_focus && ch >= 32 && ch != 127 && w.search.chars().count() < 80 {
                     if let Some(c) = char::from_u32(ch) {
                         w.search.push(c);
                         w.render();
@@ -2786,7 +2857,21 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     }
                     return;
                 }
+                if vk == b'F' as u16 && GetKeyState(VK_CONTROL.0 as i32) < 0 {
+                    w.search_focus = true;
+                    w.render();
+                    return;
+                }
                 if !w.search_focus {
+                    let page = (H - VIEW_TOP - 42.0) * w.dpi;
+                    let offset = match vk {
+                        0x21 => w.scroll - page, // Page Up
+                        0x22 => w.scroll + page, // Page Down
+                        0x24 => 0.0,             // Home
+                        0x23 => w.content_h,     // End
+                        _ => return,
+                    };
+                    w.scroll_content(offset);
                     return;
                 }
                 match vk {
@@ -2798,9 +2883,11 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         w.search_focus = false;
                     }
                     0x0D => {
-                        if let Some(t) = (0u8..=9).find(|i| w.page_matches(*i, "")) {
-                            w.go(t, true);
-                            return;
+                        if !w.search.trim().is_empty() {
+                            if let Some((page, _, _)) = w.side.first() {
+                                w.select_page(*page);
+                                return;
+                            }
                         }
                     }
                     _ => return,
@@ -2829,7 +2916,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 w.hit(x, y)
             })
             .flatten();
-            if !matches!(act, Some(Action::Search)) {
+            if !matches!(
+                act,
+                Some(Action::Search | Action::ClearSearch | Action::Tab(_))
+            ) {
                 with_win(|w| {
                     if w.search_focus {
                         w.search_focus = false;
@@ -2905,6 +2995,16 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     let _ = std::fs::create_dir_all(&dir);
                     azr_platform::launch::open(&dir.to_string_lossy());
                 }
+                Some(Action::ClearSearch) => {
+                    with_win(|w| {
+                        w.search.clear();
+                        w.search_focus = true;
+                        w.side_scroll = 0.0;
+                        w.render();
+                    });
+                    let _ = SetForegroundWindow(hwnd);
+                    let _ = SetFocus(Some(hwnd));
+                }
                 Some(Action::Search) => {
                     with_win(|w| {
                         w.search_focus = true;
@@ -2939,6 +3039,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 Some(Action::ProjectSupport) => {
                     azr_platform::launch::open("https://ericismee.github.io/Azr/")
+                }
+                Some(Action::Minimize) => {
+                    let _ = ShowWindow(hwnd, SW_MINIMIZE);
                 }
                 Some(Action::Close) => {
                     let _ = PostMessageW(Some(hwnd), WM_CLOSE_SELF, WPARAM(0), LPARAM(0));
@@ -3023,7 +3126,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Action::Material(true, m)) => prefs::update(|s| s.dock_material = m),
                 Some(Action::Material(false, m)) => prefs::update(|s| s.notch_material = m),
                 Some(Action::Tab(t)) => {
-                    with_win(|w| w.go(t, true));
+                    with_win(|w| w.select_page(t));
                 }
                 _ => {}
             }
@@ -3101,5 +3204,19 @@ unsafe fn choose_logo(hwnd: HWND, launchpad: bool) {
             ));
             let _ = MessageBoxW(Some(hwnd), &text, w!("Azr"), MB_OK | MB_ICONWARNING);
         }
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn settings_search_accepts_unaccented_vietnamese_and_out_of_order_words() {
+        assert!(search_matches("Ẩn thanh tác vụ Windows", "windows tac vu"));
+        assert!(search_matches("Chuyển giữa các cửa sổ", "cua so"));
+        assert!(search_matches("Điều khiển", "dieu"));
+        assert!(search_matches("Ta\u{0301}c vu\u{0323}", "tac vu"));
+        assert!(!search_matches("Ẩn thanh tác vụ Windows", "tac vu macos"));
     }
 }

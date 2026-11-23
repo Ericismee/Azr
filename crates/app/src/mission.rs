@@ -8,7 +8,9 @@ use azr_platform::wins::{enumerate, focus, snapshot, thumbnail, tracker};
 use azr_ui::gfx::Gfx;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::time::Instant;
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -19,13 +21,77 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Color;
 use windows::UI::Composition::{
-    CompositionDrawingSurface, CompositionStretch, Compositor, ContainerVisual, SpriteVisual,
+    CompositionDrawingSurface, CompositionStretch, Compositor, SpriteVisual,
 };
 use windows_numerics::{Vector2, Vector3};
 
 const HOTKEY_ID: i32 = 0xAB03;
 const T_ANIM: usize = 1;
-const ANIM_MS: f32 = 185.0;
+const WM_ANIMATION_FRAME: u32 = WM_APP + 1;
+const ANIMATION_TIME: Duration = Duration::from_millis(190);
+const READY: u8 = 0;
+const POSTED: u8 = 1;
+const STOPPED: u8 = 2;
+static NEXT_FRAME_ID: AtomicUsize = AtomicUsize::new(1);
+
+struct FramePump {
+    id: usize,
+    state: Arc<AtomicU8>,
+}
+
+impl FramePump {
+    fn start(hwnd: HWND, start: Instant, refresh_hz: u32) -> std::io::Result<Self> {
+        let id = NEXT_FRAME_ID.fetch_add(1, Ordering::Relaxed);
+        let state = Arc::new(AtomicU8::new(READY));
+        let worker_state = state.clone();
+        let target = hwnd.0 as isize;
+        let period = Duration::from_secs_f64(1.0 / f64::from(refresh_hz.clamp(30, 360)));
+        std::thread::Builder::new()
+            .name("azr-overview-frames".into())
+            .spawn(move || {
+                let end = start + ANIMATION_TIME;
+                let mut next = start + period;
+                loop {
+                    std::thread::sleep(next.saturating_duration_since(Instant::now()));
+                    if worker_state.load(Ordering::Acquire) == STOPPED {
+                        break;
+                    }
+                    if worker_state
+                        .compare_exchange(READY, POSTED, Ordering::AcqRel, Ordering::Relaxed)
+                        .is_ok()
+                    {
+                        let sent = unsafe {
+                            PostMessageW(
+                                Some(HWND(target as *mut _)),
+                                WM_ANIMATION_FRAME,
+                                WPARAM(id),
+                                LPARAM(0),
+                            )
+                        };
+                        if sent.is_err() {
+                            break;
+                        }
+                    }
+                    let now = Instant::now();
+                    if now >= end {
+                        break;
+                    }
+                    // Advance the deadline without replaying frames missed by a busy UI thread.
+                    while next <= now {
+                        next += period;
+                    }
+                    next = next.min(end);
+                }
+            })?;
+        Ok(Self { id, state })
+    }
+}
+
+impl Drop for FramePump {
+    fn drop(&mut self) {
+        self.state.store(STOPPED, Ordering::Release);
+    }
+}
 
 struct Tile {
     hwnd: isize,
@@ -46,6 +112,7 @@ struct Mc {
     refresh_hz: u32,
     intervals: Option<Vec<f32>>,
     last_tick: Option<Instant>,
+    frames: Option<FramePump>,
     done: bool,
     hover: Option<usize>,
     highlight: SpriteVisual,
@@ -163,16 +230,17 @@ pub fn show() {
         Ok(Some(m)) => {
             MC.with(|c| *c.borrow_mut() = Some(m));
             with_mc(|m| {
-                m.popup.show_active();
                 m.t0 = Instant::now();
                 m.step();
-                unsafe {
-                    SetTimer(
-                        Some(m.popup.hwnd),
-                        T_ANIM,
-                        (1000 / m.refresh_hz).max(USER_TIMER_MINIMUM),
-                        None,
-                    );
+                m.popup.show_active();
+                match FramePump::start(m.popup.hwnd, m.t0, m.refresh_hz) {
+                    Ok(frames) => m.frames = Some(frames),
+                    Err(_) => unsafe {
+                        if SetTimer(Some(m.popup.hwnd), T_ANIM, 16, None) == 0 {
+                            m.t0 = Instant::now() - ANIMATION_TIME;
+                            m.step();
+                        }
+                    },
                 }
             });
         }
@@ -285,6 +353,7 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
         refresh_hz: display.refresh_hz(),
         intervals: std::env::var_os("AZR_FRAME_LOG").map(|_| Vec::with_capacity(24)),
         last_tick: None,
+        frames: None,
         done: false,
         hover: None,
         highlight,
@@ -302,7 +371,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 
 impl Mc {
     fn step(&mut self) {
-        let t = (self.t0.elapsed().as_secs_f32() * 1000.0 / ANIM_MS).clamp(0.0, 1.0);
+        let t = (self.t0.elapsed().as_secs_f32() / ANIMATION_TIME.as_secs_f32()).clamp(0.0, 1.0);
         let e = 1.0 - (1.0 - t).powi(3);
         if let Some(intervals) = self.intervals.as_mut() {
             let now = Instant::now();
@@ -325,6 +394,7 @@ impl Mc {
         }
         if t >= 1.0 && !self.done {
             self.done = true;
+            self.frames = None;
             unsafe {
                 let _ = KillTimer(Some(self.popup.hwnd), T_ANIM);
             }
@@ -586,6 +656,15 @@ unsafe extern "system" fn mc_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     match msg {
         WM_CLOSE => {
             close();
+            LRESULT(0)
+        }
+        WM_ANIMATION_FRAME => {
+            with_mc(|m| {
+                if let Some(frames) = m.frames.as_ref().filter(|frames| frames.id == wp.0) {
+                    frames.state.store(READY, Ordering::Release);
+                    m.step();
+                }
+            });
             LRESULT(0)
         }
         WM_TIMER if wp.0 == T_ANIM => {

@@ -17,7 +17,7 @@ pub fn source_size(handle: isize) -> Option<(i32, i32)> {
     }
 }
 
-pub fn place(handle: isize, rect: (i32, i32, i32, i32), opacity: u8) {
+pub fn place(handle: isize, rect: (i32, i32, i32, i32), opacity: u8) -> bool {
     let props = DWM_THUMBNAIL_PROPERTIES {
         dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_VISIBLE | DWM_TNP_OPACITY,
         rcDestination: RECT {
@@ -30,9 +30,7 @@ pub fn place(handle: isize, rect: (i32, i32, i32, i32), opacity: u8) {
         opacity,
         ..Default::default()
     };
-    unsafe {
-        let _ = DwmUpdateThumbnailProperties(handle, &props);
-    }
+    unsafe { DwmUpdateThumbnailProperties(handle, &props).is_ok() }
 }
 
 pub fn unregister(handle: isize) {
