@@ -11,10 +11,10 @@ body.modal-open{overflow:hidden}.qr-panel{position:fixed;inset:0;margin:auto;wid
 .qr-panel{width:min(360px,calc(100vw - 28px));padding:26px}.qr-panel>h2{font-size:24px;margin-top:4px}.modal-intro{margin-bottom:16px}.qr-frame{padding:12px;margin-top:8px}.qr-frame img{width:100%;max-width:270px;aspect-ratio:1;height:auto}.qr-panel .qr-amount{margin:16px 0 0}.qr-links:has(>a[hidden]):not(:has(>button:not([hidden]))){display:none}.qr-panel .verify-note{text-align:center;font-size:12px;margin-top:12px}.qr-panel .qr-links{justify-content:center}@media(max-width:480px){.qr-panel{padding:24px}}
 
 
-/* Azr glass surfaces share the same cool edge and warm reflected light. */
+/* Clear glass with a bright rim and a subtle tint. */
 :root {
   --glass-edge: #ffffffc9;
-  --glass-shadow: 0 28px 64px #303c7033, 0 3px 10px #4b517a17;
+  --glass-shadow: 0 22px 56px #303c702b, 0 3px 10px #4b517a12;
   --ink: #17244a;
   --muted: #4b5878;
   color: var(--ink);
@@ -42,28 +42,28 @@ body.modal-open{overflow:hidden}.qr-panel{position:fixed;inset:0;margin:auto;wid
 }
 
 .glass-card, .qr-panel {
-  border: 1px solid transparent;
-  background:
-    radial-gradient(ellipse at 8% 0%, #ffffffb0, transparent 65%) padding-box,
-    linear-gradient(145deg, #f6fbffc9, #edf1ffc9 54%, #faf2ffc2) padding-box,
-    linear-gradient(140deg, #fff 0%, #f7faffce 30%, #a6b5ed70 62%, #fff9 100%) border-box;
-  box-shadow: var(--glass-shadow), inset 0 1px 2px #fff, inset 0 -1px 1px #fff9;
-  -webkit-backdrop-filter: blur(18px) saturate(145%);
-  backdrop-filter: blur(18px) saturate(145%);
+  border: 1px solid #ffffff80;
+  border-top-color: #fffffff0;
+  border-left-color: #ffffffbd;
+  border-bottom-color: #53649740;
+  background: linear-gradient(150deg, #ffffff54, #ffffff14 46%, #ffffff32) padding-box;
+  box-shadow: var(--glass-shadow), inset 0 1px 1px #fff9, inset 0 -1px 1px #fff5;
+  -webkit-backdrop-filter: blur(9px) saturate(128%);
+  backdrop-filter: blur(9px) saturate(128%);
 }
 
 .glass-card { border-radius: 34px; }
 
 .coffee, .language, .close-modal {
   border: 1px solid var(--glass-edge);
-  background: linear-gradient(155deg, #ffffffdc, #eff3ff9c 61%, #dae3fa80);
+  background: linear-gradient(155deg, #ffffff82, #ffffff21 65%, #ffffff43);
   color: #294575;
   box-shadow: inset 0 1px 1px #fffc, inset 0 -1px 1px #fff9, 0 3px 10px #495e9d1e;
 }
 
 select, .amount-input {
   border: 1px solid #5371af42;
-  background: linear-gradient(162deg, #ffffffb5, #f5f7ff6b 65%, #eaf0ff94);
+  background: linear-gradient(162deg, #ffffff5c, #ffffff20 65%, #ffffff37);
   box-shadow: inset 0 2px 3px #3447800a, inset 0 -1px 0 #fff;
 }
 
@@ -73,7 +73,7 @@ select, .amount-input {
 
 .preset {
   border: 1px solid #ffffffc5;
-  background: linear-gradient(155deg, #ffffffcf, #e9eeff70 54%, #f8f8ff84);
+  background: linear-gradient(155deg, #ffffff64, #ffffff1c 54%, #ffffff49);
   box-shadow: inset 0 1px 1px #fff, 0 2px 5px #3f508a19;
   color: #29416e;
 }
@@ -82,7 +82,7 @@ select, .amount-input {
 .preset[aria-pressed="true"] {
   border-color: #4169c1;
   color: #123675;
-  background: linear-gradient(155deg, #e5f7ff 5%, #b9d9ff 54%, #dbe3ff 100%);
+  background: linear-gradient(155deg, #e5f7ffbf, #81c0ff80 54%, #dbe3ff65);
   box-shadow: inset 0 1px 2px #fff, inset 0 -2px 3px #5983d52e, 0 2px 6px #285ab133;
   font-weight: 600;
 }
@@ -108,7 +108,7 @@ select, .amount-input {
 }
 
 .qr-panel::backdrop {
-  background: #172d5866;
+  background: #34477835;
   -webkit-backdrop-filter: blur(12px) saturate(130%);
   backdrop-filter: blur(12px) saturate(130%);
 }
@@ -122,10 +122,23 @@ select, .amount-input {
 @media (max-width: 760px) {
   .glass-card { border-radius: 28px; }
   .intro { max-width: 480px; margin-inline: auto; }
-  .ribbon { left: -78%; top: 36%; }
+  .ribbon { left: -87%; top: 27%; }
 }
 
 @media (max-width: 420px) {
   .glass-card { padding: 20px; }
   .preset { min-width: 0; white-space: nowrap; font-size: 13px; }
+}
+
+/* Text stays readable on the more transparent panels. */
+.hint, .amount-input span, .fx-meta, .verify-note, .modal-intro { color: #354262; }
+.amount-input input::placeholder { color: #536185; opacity: 1; }
+.fx-meta a { color: #144690; }
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass-card, .qr-panel {
+    background: #f3f6fd;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
