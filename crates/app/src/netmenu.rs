@@ -570,7 +570,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
         }
         WM_RADIO => {
             let notify = with(|n| {
-                let before = n.radio;
+                let before = n.radio.clone();
                 if let Some(r) = &n.radios {
                     while let Ok(s) = r.snapshots.try_recv() {
                         n.radio = s;

@@ -15,14 +15,17 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use windows::core::w;
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    CreateRectRgn, GetMonitorInfoW, MonitorFromPoint, SetWindowRgn, MONITORINFO,
+    MONITOR_DEFAULTTONEAREST,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, RegisterHotKey, TrackMouseEvent, UnregisterHotKey, MOD_CONTROL, MOD_NOREPEAT,
-    MOD_SHIFT, TME_LEAVE, TRACKMOUSEEVENT, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_LEFT,
-    VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
+    GetKeyState, RegisterHotKey, TrackMouseEvent, UnregisterHotKey, MOD_ALT, MOD_CONTROL,
+    MOD_NOREPEAT, MOD_SHIFT, TME_LEAVE, TRACKMOUSEEVENT, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE,
+    VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Color;
@@ -37,6 +40,7 @@ const WM_APPS: u32 = WM_APP + 80;
 const WM_CLOSE_SPOT: u32 = WM_APP + 81;
 const WM_FILES: u32 = WM_APP + 84;
 const WM_THUMBS: u32 = WM_APP + 85;
+const WM_SPOT_ICONS: u32 = WM_APP + 88;
 const WM_MOUSELEAVE_SPOT: u32 = 0x02A3;
 const T_MORPH: usize = 1;
 const T_REGION: usize = 2;
@@ -141,6 +145,7 @@ struct Spot {
     circles: Vec<GlassPanel>,
     text_cache: HashMap<String, (CompositionDrawingSurface, i32, i32)>,
     icon_cache: HashMap<String, Option<CompositionDrawingSurface>>,
+    icon_workers: HashMap<i32, icons::Worker>,
     geo: Geo,
     cur: Rect,
     buttons: bool,
@@ -179,9 +184,40 @@ struct Geo {
     win: (i32, i32, i32, i32),
 }
 
+fn fit_scale(dpi: f32, screen: (i32, i32)) -> f32 {
+    dpi.min(screen.0 as f32 / 600.0)
+        .min(screen.1 as f32 / 380.0)
+}
+
+fn pointer_work_area() -> RECT {
+    unsafe {
+        let mut cursor = POINT::default();
+        let _ = GetCursorPos(&mut cursor);
+        let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(monitor, &mut info).as_bool()
+            && info.rcWork.right > info.rcWork.left
+            && info.rcWork.bottom > info.rcWork.top
+        {
+            info.rcWork
+        } else {
+            let (right, bottom) = sys::screen_size();
+            RECT {
+                left: 0,
+                top: 0,
+                right,
+                bottom,
+            }
+        }
+    }
+}
+
 fn geo(dpi: f32, screen: (i32, i32)) -> Geo {
-    let d = dpi;
     let (sw, sh) = (screen.0 as f32, screen.1 as f32);
+    let d = fit_scale(dpi, screen);
     let h = (54.0 * d).round();
     let btn = h;
     let gap = (12.0 * d).round();
@@ -337,14 +373,14 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
         if RegisterHotKey(
             Some(hwnd),
             HOTKEY_ID,
-            MOD_CONTROL | MOD_NOREPEAT,
+            MOD_ALT | MOD_NOREPEAT,
             VK_SPACE.0 as u32,
         )
         .is_err()
         {
             log::line(
                 "spotlight",
-                "Ctrl+Space sudah dipakai program lain; hot key tidak aktif",
+                "Alt+Space is already registered; open Search from the menu or Dock",
             );
         }
         if RegisterHotKey(
@@ -459,7 +495,8 @@ fn finish_closing() {
 }
 
 fn create(comp: &Compositor, mode: Mode) -> windows_core::Result<Box<Spot>> {
-    let screen = sys::screen_size();
+    let work = pointer_work_area();
+    let screen = (work.right - work.left, work.bottom - work.top);
     let glass = prefs::glass((10.0, 10.0), 27.0, prefs::Role::Dock);
     let mut popup = Popup::new_with(
         comp,
@@ -469,7 +506,11 @@ fn create(comp: &Compositor, mode: Mode) -> windows_core::Result<Box<Spot>> {
         glass,
         true,
     )?;
-    let dpi = unsafe { GetDpiForWindow(popup.hwnd) }.max(96) as f32 / 96.0;
+    popup.set_rect(work.left + screen.0 / 2, work.top + screen.1 / 2, 10, 10)?;
+    let dpi = fit_scale(
+        unsafe { GetDpiForWindow(popup.hwnd) }.max(96) as f32 / 96.0,
+        screen,
+    );
     let tier = {
         let c = sys::conditions();
         if !c.transparency || c.battery_saver || c.remote_session {
@@ -479,7 +520,9 @@ fn create(comp: &Compositor, mode: Mode) -> windows_core::Result<Box<Spot>> {
         }
     };
     let _ = popup.panel.set_tier(tier);
-    let g = geo(dpi, screen);
+    let mut g = geo(dpi, screen);
+    g.win.0 += work.left;
+    g.win.1 += work.top;
     popup.set_rect(g.win.0, g.win.1, g.win.2, g.win.3)?;
     let idle: Rect = ((g.gw - g.ws) / 2.0, 0.0, g.ws, g.h);
     popup.panel.set_rect(idle.0, idle.1, idle.2, idle.3)?;
@@ -522,6 +565,7 @@ fn create(comp: &Compositor, mode: Mode) -> windows_core::Result<Box<Spot>> {
         circles: vec![],
         text_cache: HashMap::new(),
         icon_cache: HashMap::new(),
+        icon_workers: HashMap::new(),
         geo: g,
         cur: idle,
         buttons: false,
@@ -1144,27 +1188,58 @@ impl Spot {
         if let Some(c) = self.icon_cache.get(&key) {
             return c.clone();
         }
-        let plates = prefs::get().dock_plates;
-        let s = icons::load(path, px).and_then(|mut b| {
-            if !icons::is_themed(path) {
-                if plates && b.w == b.h {
-                    b.bgra = azr_core::iconplate::plate(&b.bgra, b.w);
-                }
-                let p = prefs::get();
-                b.bgra = azr_core::iconplate::style_icon_v(
-                    &b.bgra,
-                    p.icon_style,
-                    p.icon_tint,
-                    prefs::icon_dark(),
-                );
-            }
-            self.gfx.surface_from_bgra(b.w, b.h, &b.bgra).ok()
-        });
-        if self.icon_cache.len() > 200 {
-            self.icon_cache.clear();
+        if self.icon_cache.len() >= 512 {
+            return None;
         }
-        self.icon_cache.insert(key, s.clone());
-        s
+        let hwnd = self.popup.hwnd.0 as isize;
+        let worker = self.icon_workers.entry(px).or_insert_with(|| {
+            icons::spawn_worker(px, move || unsafe {
+                let _ = PostMessageW(
+                    Some(HWND(hwnd as *mut _)),
+                    WM_SPOT_ICONS,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            })
+        });
+        self.icon_cache.insert(key, None);
+        let _ = worker.requests.send(path.to_owned());
+        None
+    }
+
+    fn receive_icons(&mut self) {
+        let mut updated = false;
+        for (&px, worker) in &self.icon_workers {
+            for (path, bitmap) in worker.results.try_iter() {
+                let surface = bitmap.and_then(|b| Self::make_icon_surface(&self.gfx, &path, b));
+                updated |= surface.is_some();
+                self.icon_cache.insert(format!("{px}|{path}"), surface);
+            }
+        }
+        if updated {
+            self.render();
+        }
+    }
+
+    fn make_icon_surface(
+        gfx: &Gfx,
+        path: &str,
+        mut b: Bitmap,
+    ) -> Option<CompositionDrawingSurface> {
+        let plates = prefs::get().dock_plates;
+        if !icons::is_themed(path) {
+            if plates && b.w == b.h {
+                b.bgra = azr_core::iconplate::plate(&b.bgra, b.w);
+            }
+            let p = prefs::get();
+            b.bgra = azr_core::iconplate::style_icon_v(
+                &b.bgra,
+                p.icon_style,
+                p.icon_tint,
+                prefs::icon_dark(),
+            );
+        }
+        gfx.surface_from_bgra(b.w, b.h, &b.bgra).ok()
     }
 
     fn sym(
@@ -2432,6 +2507,22 @@ fn ctrl_down() -> bool {
 
 unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
+        WM_SPOT_ICONS => {
+            with_spot(|s| {
+                if s.popup.hwnd == hwnd {
+                    s.receive_icons();
+                }
+            });
+            LRESULT(0)
+        }
+        WM_DISPLAYCHANGE => {
+            // Recompute work area and DPI the next time the popup is opened.
+            if SPOT.with(|slot| slot.borrow().as_ref().is_some_and(|s| s.popup.hwnd == hwnd)) {
+                close();
+            }
+            LRESULT(0)
+        }
+
         WM_CHAR => {
             let c = wp.0 as u32;
             if c >= 32 && c != 127 && !ctrl_down() {
@@ -2729,5 +2820,16 @@ unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use super::geo;
+
+    #[test]
+    fn high_dpi_popup_fits_small_portrait_work_area() {
+        let (x, y, w, h) = geo(2.5, (600, 720)).win;
+        assert!(x >= 0 && y >= 0 && x + w <= 600 && y + h <= 720);
     }
 }

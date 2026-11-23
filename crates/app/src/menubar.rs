@@ -1713,7 +1713,7 @@ impl Bar {
                 a(103, &prefs::tr("Azr Settings…")),
                 a(105, &prefs::tr("Apps")).with_accel("Ctrl+Shift+Space"),
                 a(106, &prefs::tr("Overview")).with_accel("Ctrl+↑"),
-                a(104, &prefs::tr("Force Quit…")),
+                a(104, &prefs::tr("Force Quit Azr")),
                 Item::separator(),
                 a(110, &prefs::tr("Sleep")),
                 a(111, &prefs::tr("Restart…")),
@@ -1813,7 +1813,7 @@ impl Bar {
             101 => launch::open("ms-settings:"),
             102 => launch::open("ms-windows-store:"),
             103 => crate::settings_win::open(&self.comp),
-            104 => launch::run("taskmgr.exe", ""),
+            104 => crate::mainwin::request_quit(),
             105 => crate::launchpad::toggle(),
             106 => crate::mission::toggle(),
             110 => confirm_power(

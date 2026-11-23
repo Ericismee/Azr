@@ -2,7 +2,7 @@ use crate::icons::Bitmap;
 use windows::core::HSTRING;
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW,
+    CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW, GdiFlush,
     GetTextExtentPoint32W, SelectObject, SetBkMode, SetTextColor, ANTIALIASED_QUALITY, BITMAPINFO,
     BITMAPINFOHEADER, BI_RGB, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DIB_RGB_COLORS,
     DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HGDIOBJ,
@@ -13,7 +13,44 @@ pub const ICON_FACE: &str = "Segoe Fluent Icons";
 
 pub fn text_face() -> &'static str {
     static FACE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-    FACE.get_or_init(|| pick_face(load_bundled_fonts(), font_exists("Segoe UI Variable Text")))
+    FACE.get_or_init(|| {
+        let preferred = pick_face(load_bundled_fonts(), font_exists("Segoe UI Variable Text"));
+        [preferred, "Segoe UI Variable Text", "Segoe UI", "Arial"]
+            .into_iter()
+            .find(|face| supports_ui_text(face))
+            .unwrap_or("Segoe UI")
+    })
+}
+
+fn supports_ui_text(face: &str) -> bool {
+    use windows::Win32::Graphics::Gdi::{GetGlyphIndicesW, GGI_MARK_NONEXISTING_GLYPHS};
+    let sample: Vec<u16> = "Azr 019 Àăâđêôơưạảãấầẫễệổỗớờợựỵ".encode_utf16().collect();
+    let mut glyphs = vec![0; sample.len()];
+    unsafe {
+        let dc = CreateCompatibleDC(None);
+        let f = font(
+            &Style {
+                px: 16,
+                weight: 400,
+            },
+            face,
+        );
+        let previous = SelectObject(dc, HGDIOBJ(f.0));
+        let count = GetGlyphIndicesW(
+            dc,
+            windows::core::PCWSTR(sample.as_ptr()),
+            sample.len() as i32,
+            glyphs.as_mut_ptr(),
+            GGI_MARK_NONEXISTING_GLYPHS,
+        );
+        SelectObject(dc, previous);
+        let _ = DeleteObject(HGDIOBJ(f.0));
+        let _ = DeleteDC(dc);
+        count as usize == sample.len()
+            && glyphs
+                .into_iter()
+                .all(|glyph| glyph != 0 && glyph != 0xffff)
+    }
 }
 
 pub fn pick_face(bundled_inter: bool, segoe_variable: bool) -> &'static str {
@@ -212,11 +249,16 @@ fn render_raw(text: &str, style: &Style, face: &str, w: i32, h: i32) -> Option<B
             ..Default::default()
         };
         let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let dib = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+        let Ok(dib) = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0) else {
+            let _ = DeleteDC(dc);
+            return None;
+        };
         if bits.is_null() {
+            let _ = DeleteObject(HGDIOBJ(dib.0));
             let _ = DeleteDC(dc);
             return None;
         }
+        std::ptr::write_bytes(bits.cast::<u8>(), 0, w as usize * h as usize * 4);
         let old_bmp = SelectObject(dc, HGDIOBJ(dib.0));
         let f = font(style, face);
         let old_font = SelectObject(dc, HGDIOBJ(f.0));
@@ -236,6 +278,7 @@ fn render_raw(text: &str, style: &Style, face: &str, w: i32, h: i32) -> Option<B
             DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
         );
 
+        let _ = GdiFlush();
         let src = std::slice::from_raw_parts(bits as *const u8, (w * h * 4) as usize);
         let mut out = vec![0u8; src.len()];
         for (s, d) in src.chunks_exact(4).zip(out.chunks_exact_mut(4)) {
@@ -257,7 +300,13 @@ fn render_raw(text: &str, style: &Style, face: &str, w: i32, h: i32) -> Option<B
 
 #[cfg(test)]
 mod tests {
-    use super::pick_face;
+    use super::{pick_face, supports_ui_text, text_face};
+
+    #[test]
+    fn selected_ui_font_can_draw_english_and_vietnamese() {
+        assert!(supports_ui_text("Segoe UI"));
+        assert!(supports_ui_text(text_face()));
+    }
 
     #[test]
     fn never_picks_fonts_installed_by_the_user() {

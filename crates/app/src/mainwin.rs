@@ -1,6 +1,6 @@
 use crate::{paths, single_instance};
 use azr_platform::shell::taskbar;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -12,8 +12,23 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 pub const WM_TRAY: u32 = WM_APP + 1;
 const ID_TOGGLE_TASKBAR: usize = 1;
 pub const ID_QUIT: usize = 2;
+
+pub fn request_quit() {
+    let handle = MAIN_WINDOW.load(Ordering::Relaxed);
+    if handle != 0 {
+        unsafe {
+            let _ = PostMessageW(
+                Some(HWND(handle as *mut _)),
+                WM_COMMAND,
+                WPARAM(ID_QUIT),
+                LPARAM(0),
+            );
+        }
+    }
+}
 const TIMER_EXIT: usize = 1;
 
+static MAIN_WINDOW: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 
 pub fn create() -> windows::core::Result<HWND> {
@@ -30,7 +45,7 @@ pub fn create() -> windows::core::Result<HWND> {
             RegisterWindowMessageW(w!("TaskbarCreated")),
             Ordering::Relaxed,
         );
-        CreateWindowExW(
+        let hwnd = CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             class,
             w!("Azr"),
@@ -43,7 +58,9 @@ pub fn create() -> windows::core::Result<HWND> {
             None,
             Some(hi),
             None,
-        )
+        )?;
+        MAIN_WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
+        Ok(hwnd)
     }
 }
 
@@ -209,6 +226,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             LRESULT(0)
         }
         WM_DESTROY => {
+            MAIN_WINDOW.store(0, Ordering::Relaxed);
             crate::fx::restore_all();
             taskbar::restore();
             remove_tray(hwnd);

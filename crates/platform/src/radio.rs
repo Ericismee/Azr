@@ -2,10 +2,11 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use windows::Devices::Radios::{Radio, RadioKind, RadioState};
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Snapshot {
     pub wifi: Option<bool>,
     pub bluetooth: Option<bool>,
+    pub ssid: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -33,7 +34,7 @@ fn read_all() -> Vec<Radio> {
         .collect()
 }
 
-fn snapshot(radios: &[Radio]) -> Snapshot {
+fn snapshot(radios: &[Radio], include_ssid: bool) -> Snapshot {
     let state = |k: RadioKind| {
         radios
             .iter()
@@ -43,10 +44,23 @@ fn snapshot(radios: &[Radio]) -> Snapshot {
     Snapshot {
         wifi: state(RadioKind::WiFi),
         bluetooth: state(RadioKind::Bluetooth),
+        ssid: if include_ssid {
+            crate::wifi::ssid()
+        } else {
+            None
+        },
     }
 }
 
 pub fn spawn(notify: impl Fn() + Send + 'static) -> Radios {
+    spawn_worker(false, notify)
+}
+
+pub fn spawn_with_ssid(notify: impl Fn() + Send + 'static) -> Radios {
+    spawn_worker(true, notify)
+}
+
+fn spawn_worker(include_ssid: bool, notify: impl Fn() + Send + 'static) -> Radios {
     let (cmd_tx, cmd_rx) = channel::<Cmd>();
     let (snap_tx, snap_rx) = channel::<Snapshot>();
     std::thread::spawn(move || {
@@ -54,7 +68,7 @@ pub fn spawn(notify: impl Fn() + Send + 'static) -> Radios {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
         let _ = Radio::RequestAccessAsync().ok().and_then(|o| o.join().ok());
-        let _ = snap_tx.send(snapshot(&read_all()));
+        let _ = snap_tx.send(snapshot(&read_all(), include_ssid));
         notify();
         while let Ok(cmd) = cmd_rx.recv() {
             if let Cmd::Set(kind, on) = cmd {
@@ -70,7 +84,7 @@ pub fn spawn(notify: impl Fn() + Send + 'static) -> Radios {
                     }
                 }
             }
-            let _ = snap_tx.send(snapshot(&read_all()));
+            let _ = snap_tx.send(snapshot(&read_all(), include_ssid));
             notify();
         }
     });

@@ -7,7 +7,7 @@ use azr_platform::icons::Bitmap;
 use azr_platform::media::{self, ArtUpdate, Command};
 use azr_platform::radio::{self, Cmd as RadioCmd, Kind as RK};
 use azr_platform::text::{measure, render, render_face, Style, ICON_FACE};
-use azr_platform::{audio, brightness, keys, launch, wifi};
+use azr_platform::{audio, brightness, keys, launch};
 use azr_ui::gfx::Gfx;
 use azr_ui::glass::{GlassPanel, GlassParams, Tier};
 use std::cell::RefCell;
@@ -173,7 +173,6 @@ struct Cc {
 }
 
 const T_CLOSE: usize = 1;
-const T_INTRO: usize = 2;
 const T_REMOVE: usize = 3;
 
 thread_local! {
@@ -330,16 +329,17 @@ impl Cc {
         }
         let ctl = self.ctl.0 as isize;
         if self.radios.is_none() {
-            self.radios = Some(radio::spawn(move || unsafe {
+            self.radios = Some(radio::spawn_with_ssid(move || unsafe {
                 let _ = PostMessageW(Some(HWND(ctl as *mut _)), WM_RADIO, WPARAM(0), LPARAM(0));
             }));
+        } else if let Some(radios) = &self.radios {
+            let _ = radios.commands.send(RadioCmd::Refresh);
         }
         if self.media.is_none() && self.layout.contains(&Kind::NowPlaying) {
             self.media = Some(media::spawn(move || unsafe {
                 let _ = PostMessageW(Some(HWND(ctl as *mut _)), WM_MEDIA, WPARAM(0), LPARAM(0));
             }));
         }
-        self.ssid = wifi::ssid();
         self.intro = true;
         self.build();
         self.intro = false;
@@ -347,15 +347,10 @@ impl Cc {
             let _ = p.popup.root().SetOpacity(0.0);
             p.popup.show();
         }
-        unsafe {
-            SetTimer(Some(self.ctl), T_INTRO, 60, None);
-        }
+        self.start_intro();
     }
 
     fn start_intro(&mut self) {
-        unsafe {
-            let _ = KillTimer(Some(self.ctl), T_INTRO);
-        }
         let items = std::mem::take(&mut self.intro_items);
         if self.closing {
             return;
@@ -369,13 +364,13 @@ impl Cc {
                 Y: pad(),
                 Z: 0.0,
             },
-            0.45,
-            1.025,
+            0.95,
+            1.0,
             0,
             motion::CC_OPEN_MS,
         );
         for (v, center, delay) in items {
-            let _ = motion::pop_in(&self.comp, &v, center, 0.7, 1.04, delay, 360);
+            let _ = motion::pop_in(&self.comp, &v, center, 0.96, 1.0, delay.min(28), 155);
         }
     }
 
@@ -384,9 +379,6 @@ impl Cc {
             return;
         }
         azr_platform::input::end_dismiss();
-        unsafe {
-            let _ = KillTimer(Some(self.ctl), T_INTRO);
-        }
         self.intro_items.clear();
         self.edit = false;
         if let Some(g) = self.gallery.take() {
@@ -2779,9 +2771,9 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                     while let Ok(s) = r.snapshots.try_recv() {
                         c.wifi = s.wifi;
                         c.bt = s.bluetooth;
+                        c.ssid = s.ssid;
                     }
                 }
-                c.ssid = wifi::ssid();
                 if c.panel.is_some() && !c.edit {
                     c.build();
                 }
@@ -2818,10 +2810,6 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
         }
         WM_TIMER if wp.0 == T_REMOVE => {
             with(|c| c.finish_remove());
-            LRESULT(0)
-        }
-        WM_TIMER if wp.0 == T_INTRO => {
-            with(|c| c.start_intro());
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),

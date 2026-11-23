@@ -281,7 +281,7 @@ const VI: &[(&str, &str)] = &[
     ("About This PC", "Giới thiệu máy tính"),
     ("System Settings…", "Cài đặt hệ thống…"),
     ("Microsoft Store…", "Microsoft Store…"),
-    ("Force Quit…", "Buộc thoát…"),
+    ("Force Quit Azr", "Buộc thoát Azr"),
     ("Sleep", "Ngủ"),
     ("Restart…", "Khởi động lại…"),
     ("Shut Down…", "Tắt máy…"),
