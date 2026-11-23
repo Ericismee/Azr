@@ -544,6 +544,10 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
 
 unsafe extern "system" fn mc_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
+        WM_CLOSE => {
+            close();
+            LRESULT(0)
+        }
         WM_TIMER if wp.0 == T_ANIM => {
             with_mc(|m| m.step());
             LRESULT(0)

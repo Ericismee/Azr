@@ -4,7 +4,7 @@ pub enum Slot {
     Separator,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Metrics {
     pub icon: f32,
     pub gap: f32,

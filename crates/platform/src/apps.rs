@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_MULTITHREADED};
 use windows::Win32::UI::Shell::{
     BHID_EnumItems, FOLDERID_AppsFolder, IEnumShellItems, IShellItem, SHGetKnownFolderItem,
@@ -11,7 +12,7 @@ pub struct App {
     pub path: String,
 }
 
-static CACHE: Mutex<Option<Vec<App>>> = Mutex::new(None);
+static CACHE: Mutex<Option<(Instant, Vec<App>)>> = Mutex::new(None);
 static LOADING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn load() -> Vec<App> {
@@ -62,6 +63,14 @@ fn load() -> Vec<App> {
 }
 
 pub fn refresh(notify: impl Fn() + Send + 'static) {
+    if CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|(at, apps)| !apps.is_empty() && at.elapsed() < Duration::from_secs(60))
+    {
+        return;
+    }
     if LOADING.swap(true, std::sync::atomic::Ordering::AcqRel) {
         return;
     }
@@ -71,9 +80,16 @@ pub fn refresh(notify: impl Fn() + Send + 'static) {
         }
         let list = load();
         crate::log::line("apps", &format!("indeks: {} aplikasi", list.len()));
-        *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(list);
+        let changed = {
+            let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            let changed = cache.as_ref().is_none_or(|(_, old)| *old != list);
+            *cache = Some((Instant::now(), list));
+            changed
+        };
         LOADING.store(false, std::sync::atomic::Ordering::Release);
-        notify();
+        if changed {
+            notify();
+        }
     });
 }
 
@@ -81,7 +97,8 @@ pub fn snapshot() -> Vec<App> {
     CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .clone()
+        .as_ref()
+        .map(|(_, apps)| apps.clone())
         .unwrap_or_default()
 }
 

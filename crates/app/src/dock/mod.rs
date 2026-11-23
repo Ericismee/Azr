@@ -178,6 +178,7 @@ pub struct Dock {
 
     entries: Vec<Entry>,
     slots: Vec<Slot>,
+    measured_width: Option<(Vec<Slot>, Metrics, f32)>,
     views: Vec<View>,
     layout: Layout,
 
@@ -438,6 +439,7 @@ impl Dock {
                 seen: vec![],
                 entries: vec![],
                 slots: vec![],
+                measured_width: None,
                 views: vec![],
                 layout: Layout {
                     cells: vec![],
@@ -538,7 +540,15 @@ impl Dock {
     }
 
     fn resize_window(&mut self) {
-        let need = self.max_content_width() + 2.0 * self.pad_side + 40.0 * self.dpi;
+        let width = match &self.measured_width {
+            Some((slots, metrics, width)) if slots == &self.slots && *metrics == self.m => *width,
+            _ => {
+                let width = self.max_content_width();
+                self.measured_width = Some((self.slots.clone(), self.m, width));
+                width
+            }
+        };
+        let need = width + 2.0 * self.pad_side + 40.0 * self.dpi;
         let w = (need.ceil() as i32).clamp(200, self.screen.0);
         self.win.0 = w;
         self.win_pos = (

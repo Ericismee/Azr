@@ -42,6 +42,9 @@ const WM_MOUSELEAVE_SPOT: u32 = 0x02A3;
 const T_MORPH: usize = 1;
 const T_REGION: usize = 2;
 const T_FINISH: usize = 9;
+const T_FILE_QUERY: usize = 10;
+const T_ICON_REFRESH: usize = 11;
+const FILE_QUERY_DELAY_MS: u32 = 130;
 const HOTKEY_ID: i32 = 0xAB01;
 const HOTKEY_APPS: i32 = 0xAB02;
 const COLS: usize = 5;
@@ -135,6 +138,8 @@ struct Spot {
     filter: Option<Filter>,
     files: Vec<Hit>,
     files_gen: u64,
+    files_running: bool,
+    files_due: bool,
     shared_files: Arc<Mutex<(u64, Vec<Hit>)>>,
     quick: HashMap<String, String>,
     editing: Option<usize>,
@@ -144,6 +149,7 @@ struct Spot {
     text_cache: HashMap<String, (CompositionDrawingSurface, i32, i32)>,
     icon_cache: HashMap<String, Option<CompositionDrawingSurface>>,
     icon_workers: HashMap<i32, icons::Worker>,
+    icon_refresh_queued: bool,
     geo: Geo,
     cur: Rect,
     buttons: bool,
@@ -541,6 +547,8 @@ fn create(comp: &Compositor, mode: Mode) -> windows_core::Result<Box<Spot>> {
         filter: None,
         files: vec![],
         files_gen: 0,
+        files_running: false,
+        files_due: false,
         shared_files: Arc::new(Mutex::new((0, vec![]))),
         quick,
         editing: None,
@@ -550,6 +558,7 @@ fn create(comp: &Compositor, mode: Mode) -> windows_core::Result<Box<Spot>> {
         text_cache: HashMap::new(),
         icon_cache: HashMap::new(),
         icon_workers: HashMap::new(),
+        icon_refresh_queued: false,
         geo: g,
         cur: idle,
         buttons: false,
@@ -702,6 +711,7 @@ impl Spot {
     fn reset_state(&mut self, mode: Mode) {
         self.mode = mode;
         self.query.clear();
+        self.request_files();
         self.query_selected = false;
         self.sel = 0;
         self.scroll = 0;
@@ -1043,38 +1053,53 @@ impl Spot {
     }
 
     fn request_files(&mut self) {
-        let q = self.query.trim().to_string();
         self.files_gen += 1;
-        if q.chars().count() < 2 {
-            self.files.clear();
+        self.files_due = false;
+        self.files.clear();
+        unsafe {
+            let hwnd = self.popup.hwnd;
+            let _ = KillTimer(Some(hwnd), T_FILE_QUERY);
+            if self.query.trim().chars().count() >= 2 {
+                SetTimer(Some(hwnd), T_FILE_QUERY, FILE_QUERY_DELAY_MS, None);
+            }
+        }
+    }
+
+    fn start_file_query(&mut self) {
+        if self.files_running || !self.files_due {
             return;
         }
-        let (gen, shared) = (self.files_gen, self.shared_files.clone());
-        let h = CTL
-            .with(|c| c.borrow().as_ref().map(|c| c.hwnd.0 as isize))
-            .unwrap_or(0);
+        self.files_due = false;
+        let query = self.query.trim().to_owned();
+        if query.chars().count() < 2 {
+            return;
+        }
+        self.files_running = true;
+        let gen = self.files_gen;
+        let shared = self.shared_files.clone();
+        let handle = self.popup.hwnd.0 as isize;
         std::thread::spawn(move || {
-            let hits = filesearch::search(&q);
-            {
-                let mut g = shared.lock().unwrap();
-                if gen >= g.0 {
-                    *g = (gen, hits);
-                }
-            }
+            let hits = filesearch::search(&query);
+            *shared.lock().unwrap_or_else(|e| e.into_inner()) = (gen, hits);
             unsafe {
-                let _ = PostMessageW(Some(HWND(h as *mut _)), WM_FILES, WPARAM(0), LPARAM(0));
+                let _ = PostMessageW(Some(HWND(handle as *mut _)), WM_FILES, WPARAM(0), LPARAM(0));
             }
         });
     }
 
-    fn take_files(&mut self) -> bool {
-        let g = self.shared_files.lock().unwrap();
-        if g.0 == self.files_gen && g.0 != 0 {
-            self.files = g.1.clone();
-            true
-        } else {
-            false
+    fn finish_file_query(&mut self) {
+        self.files_running = false;
+        let (gen, hits) =
+            std::mem::take(&mut *self.shared_files.lock().unwrap_or_else(|e| e.into_inner()));
+        if gen == self.files_gen && gen != 0 && matches!(self.mode, Mode::Search | Mode::Files) {
+            self.files = hits;
+            let (sel, scroll) = (self.sel, self.scroll);
+            self.rebuild_rows();
+            self.sel = sel.min(self.rows.len().saturating_sub(1));
+            self.scroll = scroll;
+            self.render();
         }
+        self.start_file_query();
     }
 
     fn action_row(&self, i: usize) -> Row {
@@ -2514,18 +2539,6 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             });
             LRESULT(0)
         }
-        WM_FILES => {
-            with_spot(|s| {
-                if s.take_files() && matches!(s.mode, Mode::Search | Mode::Files) {
-                    let (sel, scroll) = (s.sel, s.scroll);
-                    s.rebuild_rows();
-                    s.sel = sel.min(s.rows.len().saturating_sub(1));
-                    s.scroll = scroll;
-                    s.render();
-                }
-            });
-            LRESULT(0)
-        }
         m if m == prefs::WM_PREFS => {
             sync_launchpad_key(hwnd);
             clipboard::set_enabled(prefs::get().clipboard_history);
@@ -2541,9 +2554,40 @@ fn ctrl_down() -> bool {
 
 unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
-        WM_SPOT_ICONS => {
+        WM_TIMER if wp.0 == T_FILE_QUERY => {
+            let _ = KillTimer(Some(hwnd), T_FILE_QUERY);
             with_spot(|s| {
                 if s.popup.hwnd == hwnd {
+                    s.files_due = true;
+                    s.start_file_query();
+                }
+            });
+            LRESULT(0)
+        }
+        WM_FILES => {
+            with_spot(|s| {
+                if s.popup.hwnd == hwnd {
+                    s.finish_file_query();
+                }
+            });
+            LRESULT(0)
+        }
+        WM_SPOT_ICONS => {
+            with_spot(|s| {
+                if s.popup.hwnd == hwnd && !s.icon_refresh_queued {
+                    s.icon_refresh_queued = SetTimer(Some(hwnd), T_ICON_REFRESH, 16, None) != 0;
+                    if !s.icon_refresh_queued {
+                        s.receive_icons();
+                    }
+                }
+            });
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == T_ICON_REFRESH => {
+            let _ = KillTimer(Some(hwnd), T_ICON_REFRESH);
+            with_spot(|s| {
+                if s.popup.hwnd == hwnd {
+                    s.icon_refresh_queued = false;
                     s.receive_icons();
                 }
             });
@@ -2612,7 +2656,7 @@ unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
                     if !s.query.is_empty() {
                         s.query.clear();
                         s.query_selected = false;
-                        s.files.clear();
+                        s.request_files();
                         s.rebuild_rows();
                         s.render();
                         return true;
@@ -2867,8 +2911,12 @@ unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             }
             LRESULT(0)
         }
-        m if m == WM_CLOSE_SPOT => {
-            close();
+        WM_CLOSE | WM_CLOSE_SPOT => {
+            let active =
+                SPOT.with(|slot| slot.borrow().as_ref().is_some_and(|s| s.popup.hwnd == hwnd));
+            if active {
+                close();
+            }
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),

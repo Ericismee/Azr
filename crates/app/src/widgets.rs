@@ -84,12 +84,38 @@ struct Gallery {
     closing: bool,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+struct WidgetAppearance {
+    style: u8,
+    lang: azr_core::i18n::Lang,
+    clock_24h: bool,
+    accent: u8,
+    dock: azr_core::settings::Look,
+    gallery: azr_core::settings::Look,
+}
+
+impl WidgetAppearance {
+    fn current() -> Self {
+        let settings = prefs::get();
+        Self {
+            style: settings.widget_style,
+            lang: settings.lang,
+            clock_24h: settings.clock_24h,
+            accent: settings.accent,
+            dock: prefs::look(prefs::Role::Dock),
+            gallery: prefs::look(prefs::Role::Themed),
+        }
+    }
+}
+
 struct Mgr {
     ctl: HWND,
     comp: Compositor,
     gfx: Option<Gfx>,
     dpi: f32,
     origin: (i32, i32),
+    display_size: (i32, i32),
+    appearance: WidgetAppearance,
     list: Vec<Widget>,
     cache: HashMap<String, (CompositionDrawingSurface, i32, i32)>,
     edit: bool,
@@ -306,6 +332,8 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
                 gfx: Gfx::shared(comp).ok(),
                 dpi,
                 origin: display.origin(),
+                display_size: display.size(),
+                appearance: WidgetAppearance::current(),
                 list: Vec::new(),
                 cache: HashMap::new(),
                 edit: false,
@@ -425,9 +453,21 @@ impl Mgr {
         let _ = std::fs::write(list_file(), widgets::to_text(&list));
     }
 
-    fn rebuild_all(&mut self) {
+    fn rebuild_all(&mut self) -> bool {
         let display = crate::display::selected();
         let origin = display.origin();
+        let dpi = display.dpi();
+        let size = display.size();
+        let appearance = WidgetAppearance::current();
+        if origin == self.origin
+            && dpi == self.dpi
+            && size == self.display_size
+            && appearance == self.appearance
+        {
+            return false;
+        }
+        self.display_size = size;
+        self.appearance = appearance;
         let delta = (origin.0 - self.origin.0, origin.1 - self.origin.1);
         let placed: Vec<_> = self
             .list
@@ -453,6 +493,7 @@ impl Mgr {
         if moved {
             self.save();
         }
+        true
     }
 
     fn spawn(&mut self, kind: Kind, pos: (i32, i32), pop: bool) -> Option<usize> {
@@ -1996,8 +2037,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
         }
         prefs::WM_PREFS => {
             with(|m| {
-                m.rebuild_all();
-                if m.gallery.is_some() {
+                if m.rebuild_all() && m.gallery.is_some() {
                     m.refresh_gallery();
                 }
             });
