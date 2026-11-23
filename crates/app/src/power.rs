@@ -4,20 +4,22 @@ use crate::prefs::{self, Role};
 use azr_core::symbols::Sym;
 use azr_ui::gfx::Gfx;
 use std::cell::RefCell;
-use windows::core::{w, Error, Result, HSTRING};
+use windows::core::{w, Error, Result, HRESULT, HSTRING};
 use windows::Win32::Foundation::{
-    CloseHandle, GetLastError, SetLastError, ERROR_SUCCESS, HANDLE, HWND, LPARAM, LRESULT, LUID,
-    POINT, WPARAM,
+    CloseHandle, GetLastError, SetLastError, ERROR_NOT_SUPPORTED, ERROR_SUCCESS, HANDLE, HWND,
+    LPARAM, LRESULT, LUID, POINT, WPARAM,
 };
 use windows::Win32::Security::{
     AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED,
     SE_SHUTDOWN_NAME, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
 };
 use windows::Win32::System::{
-    Power::SetSuspendState,
+    Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED},
+    Power::{GetPwrCapabilities, SetSuspendState, SYSTEM_POWER_CAPABILITIES},
     Shutdown::{ExitWindowsEx, EWX_LOGOFF, EWX_POWEROFF, EWX_REBOOT, SHTDN_REASON_FLAG_PLANNED},
     Threading::{GetCurrentProcess, OpenProcessToken},
 };
+use windows::Win32::UI::Shell::{IShellDispatch, Shell};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::{Color, Composition::Compositor};
 
@@ -55,6 +57,23 @@ impl Action {
     }
 
     fn execute(self) -> Result<()> {
+        if self != Self::Sleep {
+            return self.execute_native();
+        }
+        let mut capabilities = SYSTEM_POWER_CAPABILITIES::default();
+        let modern = unsafe { GetPwrCapabilities(&mut capabilities) } && capabilities.AoAc;
+        if use_windows_sleep_dialog(modern, None) {
+            return show_windows_sleep_dialog();
+        }
+        match self.execute_native() {
+            Err(error) if use_windows_sleep_dialog(false, Some(error.code())) => {
+                show_windows_sleep_dialog()
+            }
+            result => result,
+        }
+    }
+
+    fn execute_native(self) -> Result<()> {
         unsafe {
             if self == Self::SignOut {
                 return ExitWindowsEx(EWX_LOGOFF, SHTDN_REASON_FLAG_PLANNED);
@@ -108,6 +127,21 @@ impl Action {
             Self::SignOut => unreachable!(),
         };
         let _ = AdjustTokenPrivileges(token, false, Some(&previous), 0, None, None);
+        result
+    }
+}
+
+fn use_windows_sleep_dialog(modern_standby: bool, error: Option<HRESULT>) -> bool {
+    modern_standby || error == Some(HRESULT::from_win32(ERROR_NOT_SUPPORTED.0))
+}
+
+fn show_windows_sleep_dialog() -> Result<()> {
+    azr_platform::log::line("power", "Sleep: opening the Windows power dialog");
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
+        let result = CoCreateInstance::<_, IShellDispatch>(&Shell, None, CLSCTX_ALL)
+            .and_then(|shell| shell.ShutdownWindows());
+        CoUninitialize();
         result
     }
 }
@@ -397,6 +431,20 @@ fn run(action: Action) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn modern_standby_and_unsupported_sleep_use_windows_power_dialog() {
+        assert!(use_windows_sleep_dialog(true, None));
+        assert!(use_windows_sleep_dialog(
+            false,
+            Some(HRESULT::from_win32(ERROR_NOT_SUPPORTED.0))
+        ));
+        assert!(!use_windows_sleep_dialog(false, None));
+        assert!(!use_windows_sleep_dialog(
+            false,
+            Some(HRESULT::from_win32(5))
+        ));
+    }
 
     #[test]
     fn quick_power_only_skips_shutdown_and_restart_confirmation() {
