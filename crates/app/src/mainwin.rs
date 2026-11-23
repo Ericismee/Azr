@@ -10,7 +10,6 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub const WM_TRAY: u32 = WM_APP + 1;
-const ID_TOGGLE_TASKBAR: usize = 1;
 pub const ID_QUIT: usize = 2;
 
 pub fn request_quit() {
@@ -149,28 +148,9 @@ pub fn set_taskbar_hidden(on: bool) {
     crate::dock::request_appbar_resync();
 }
 
-pub fn toggle_taskbar() {
-    if TAKEOVER_ALLOWED.load(Ordering::Relaxed) {
-        let hidden = taskbar::is_hidden();
-        crate::prefs::update(|s| s.takeover = !hidden);
-    }
-}
-
 fn show_menu(hwnd: HWND) {
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
-        let check = if taskbar::is_hidden() {
-            MF_CHECKED
-        } else {
-            MF_UNCHECKED
-        };
-        let _ = AppendMenuW(
-            menu,
-            MF_STRING | check,
-            ID_TOGGLE_TASKBAR,
-            &windows::core::HSTRING::from(crate::prefs::tr("Hide the Windows taskbar")),
-        );
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, MF_STRING, ID_QUIT, w!("Quit Azr"));
         let mut pt = POINT::default();
         let _ = GetCursorPos(&mut pt);
@@ -219,7 +199,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_COMMAND => {
             match wp.0 & 0xFFFF {
-                ID_TOGGLE_TASKBAR => toggle_taskbar(),
                 ID_QUIT => {
                     let _ = DestroyWindow(hwnd);
                 }

@@ -70,6 +70,7 @@ struct Bar {
     hidden: Vec<isize>,
     menu: Menu,
     open: Option<u32>,
+    menu_target: Option<(isize, u32)>,
     hover: Option<u32>,
     tracking: bool,
     wifi: Option<bool>,
@@ -404,6 +405,7 @@ fn create(comp: &Compositor) -> windows_core::Result<Box<Bar>> {
         hidden: vec![],
         menu,
         open: None,
+        menu_target: None,
         hover: None,
         tracking: false,
         wifi: None,
@@ -674,7 +676,7 @@ impl Bar {
         }
         let mut changed = false;
         self.check_fullscreen();
-        if self.fullscreen {
+        if self.fullscreen || self.open.is_some() {
             return false;
         }
         let native = azr_platform::menus::read(fg).unwrap_or_default();
@@ -1565,6 +1567,18 @@ impl Bar {
     }
 
     fn open_menu(&mut self, id: u32) {
+        if self.open.is_none() {
+            let fg = focus::foreground();
+            let hwnd = if fg != 0 && window_pid(fg) == std::process::id() {
+                tracker::external_foreground()
+            } else {
+                fg
+            };
+            self.menu_target = enumerate::list(std::process::id())
+                .iter()
+                .find(|w| w.hwnd == hwnd)
+                .map(|w| (w.hwnd, window_pid(w.hwnd)));
+        }
         let items = self.menu_items(id);
         log::line("menubar", &format!("buka menu {id}: {} item", items.len()));
         let Some((x, _)) = self.rect_of(id) else {
@@ -1587,6 +1601,7 @@ impl Bar {
     fn close_menu(&mut self) {
         self.menu.hide();
         self.open = None;
+        self.menu_target = None;
         self.update_capsule();
     }
 
@@ -1605,7 +1620,10 @@ impl Bar {
     }
 
     fn menu_items_raw(&self, id: u32) -> Vec<Item> {
-        let a = |id: usize, label: &str| Item::action(id, label, true);
+        let a = |id: usize, label: &str| {
+            let needs_window = matches!(id, 201 | 202 | 204 | 300..=699);
+            Item::action(id, label, !needs_window || self.menu_target.is_some())
+        };
         if (NATIVE0..NATIVE0 + 20).contains(&id) {
             let tops =
                 azr_platform::menus::read(self.native_hwnd).unwrap_or_else(|| self.native.clone());
@@ -1714,18 +1732,6 @@ impl Bar {
                 a(103, &prefs::tr("Azr Settings…")),
                 a(105, &prefs::tr("Apps")).with_accel(crate::launchpad::shortcut_label()),
                 a(106, &prefs::tr("Overview")).with_accel("Ctrl+↑"),
-                a(
-                    107,
-                    &format!(
-                        "{}{}",
-                        if azr_platform::shell::taskbar::is_hidden() {
-                            "✓ "
-                        } else {
-                            ""
-                        },
-                        prefs::tr("Hide the Windows taskbar")
-                    ),
-                ),
                 a(108, &prefs::tr("Open Task Manager")),
                 a(104, &prefs::tr("Force Quit Azr")),
                 Item::separator(),
@@ -1753,7 +1759,7 @@ impl Bar {
                 a(301, &prefs::tr("Open…")).with_accel("Ctrl+O"),
                 Item::separator(),
                 a(302, &prefs::tr("Save")).with_accel("Ctrl+S"),
-                a(303, &prefs::tr("Close Window")).with_accel("Ctrl+W"),
+                a(303, &prefs::tr("Close Window")).with_accel("Alt+F4"),
                 Item::separator(),
                 a(304, &prefs::tr("Print…")).with_accel("Ctrl+P"),
             ],
@@ -1776,10 +1782,11 @@ impl Bar {
                 a(503, &prefs::tr("Actual Size")).with_accel("Ctrl+0"),
             ],
             M_WIN => vec![
-                a(600, &prefs::tr("Minimize")).with_accel("Win+↓"),
-                a(601, &prefs::tr("Zoom")).with_accel("Win+↑"),
+                a(600, &prefs::tr("Minimize")),
+                a(601, &prefs::tr("Maximize / Restore")),
+                a(303, &prefs::tr("Close Window")).with_accel("Alt+F4"),
             ],
-            M_HELP => vec![a(700, &prefs::tr("Search Help")).with_accel("F1")],
+            M_HELP => vec![a(700, &prefs::tr("Azr Help and Feedback"))],
             _ => vec![],
         }
     }
@@ -1817,10 +1824,41 @@ impl Bar {
     }
 
     fn pick(&mut self, cmd: usize) {
+        let target = self.menu_target;
         self.close_menu();
-        if cmd >= NATIVE_CMD {
-            azr_platform::menus::invoke(self.native_hwnd, (cmd - NATIVE_CMD) as u32);
-            return;
+        if matches!(cmd, 201 | 202 | 204 | 300..=699) || cmd >= NATIVE_CMD {
+            let Some((hwnd, _)) = target.filter(|(h, pid)| *pid != 0 && window_pid(*h) == *pid)
+            else {
+                return;
+            };
+            if cmd >= NATIVE_CMD {
+                if hwnd == self.native_hwnd {
+                    azr_platform::menus::invoke(hwnd, (cmd - NATIVE_CMD) as u32);
+                }
+                return;
+            }
+            match cmd {
+                303 => return focus::request_close(hwnd),
+                600 | 601 => {
+                    let h = HWND(hwnd as *mut _);
+                    unsafe {
+                        let how = match cmd {
+                            600 => SW_MINIMIZE,
+                            _ if IsZoomed(h).as_bool() => SW_RESTORE,
+                            _ => SW_MAXIMIZE,
+                        };
+                        let _ = ShowWindowAsync(h, how);
+                    }
+                    return;
+                }
+                _ => {}
+            }
+            let fg = focus::foreground();
+            if fg != hwnd
+                && (window_pid(fg) != std::process::id() || !focus::force_foreground(hwnd))
+            {
+                return;
+            }
         }
         match cmd {
             100 => launch::open("ms-settings:about"),
@@ -1828,7 +1866,6 @@ impl Bar {
             102 => launch::open("ms-windows-store:"),
             103 => crate::settings_win::open(&self.comp),
             104 => crate::mainwin::request_quit(),
-            107 => crate::mainwin::toggle_taskbar(),
             108 => launch::task_manager(),
             105 => crate::launchpad::toggle(),
             106 => crate::mission::toggle(),
@@ -1874,7 +1911,6 @@ impl Bar {
             300 => keys::chord(&[keys::CTRL, 0x4E]),
             301 => keys::chord(&[keys::CTRL, 0x4F]),
             302 => keys::chord(&[keys::CTRL, 0x53]),
-            303 => keys::chord(&[keys::CTRL, 0x57]),
             304 => keys::chord(&[keys::CTRL, 0x50]),
             400 => keys::chord(&[keys::CTRL, 0x5A]),
             401 => keys::chord(&[keys::CTRL, 0x59]),
@@ -1887,9 +1923,7 @@ impl Bar {
             501 => keys::chord(&[keys::CTRL, 0xBB]),
             502 => keys::chord(&[keys::CTRL, 0xBD]),
             503 => keys::chord(&[keys::CTRL, 0x30]),
-            600 => keys::chord(&[keys::WIN, 0x28]),
-            601 => keys::chord(&[keys::WIN, 0x26]),
-            700 => keys::chord(&[0x70]),
+            700 => launch::open("https://github.com/Ericismee/Azr/issues/4"),
             _ => {}
         }
     }
@@ -1924,6 +1958,12 @@ impl Bar {
             }
         }
     }
+}
+
+fn window_pid(hwnd: isize) -> u32 {
+    let mut pid = 0;
+    unsafe { GetWindowThreadProcessId(HWND(hwnd as *mut _), Some(&mut pid)) };
+    pid
 }
 
 fn xy(lp: LPARAM) -> (f32, f32) {

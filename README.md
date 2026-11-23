@@ -53,8 +53,8 @@ In this Task Manager snapshot, Azr shows **6.6 MB** of memory and **0.1% CPU**, 
 
 Requires **Windows 11 x64 (Intel/AMD)**. Both packages include the required Visual C++ runtime DLLs, fonts, and logo. You do not need Rust, Visual Studio, .NET, or a separate Visual C++ Redistributable installation.
 
-- **[EXE installer](https://github.com/Ericismee/Azr/releases/download/v0.1.4/Azr-Setup-0.1.4-x64.exe):** Run Setup, then open Azr from the Start Menu. It installs for the current user in `%LOCALAPPDATA%\Programs\Azr`.
-- **[Complete portable package](https://github.com/Ericismee/Azr/releases/download/v0.1.4/Azr-0.1.4-windows-x64-portable-complete.zip):** Extract the entire ZIP and open `azr.exe`. Keep both EXEs, the DLLs, `fonts`, and `brand` together.
+- **[EXE installer](https://github.com/Ericismee/Azr/releases/download/v0.1.5/Azr-Setup-0.1.5-x64.exe):** Run Setup, then open Azr from the Start Menu. It installs for the current user in `%LOCALAPPDATA%\Programs\Azr`.
+- **[Complete portable package](https://github.com/Ericismee/Azr/releases/download/v0.1.5/Azr-0.1.5-windows-x64-portable-complete.zip):** Extract the entire ZIP and open `azr.exe`. Keep both EXEs, the DLLs, `fonts`, and `brand` together.
 
 Runtime packages contain no source code or debug files. Windows system components and graphics drivers must still function normally. Windows 10, 32-bit systems, and ARM support have not been verified. EXEs are unsigned; use `SHA256SUMS.txt` in the [release](https://github.com/Ericismee/Azr/releases/latest) to verify downloads. To build from source, see the [build guide](docs/BUILD.md).
 

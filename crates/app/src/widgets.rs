@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows::core::w;
 use windows::Foundation::TimeSpan;
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VK_BACK, VK_ESCAPE,
@@ -117,6 +117,7 @@ struct Mgr {
     display_size: (i32, i32),
     appearance: WidgetAppearance,
     list: Vec<Widget>,
+    control_center_area: Option<RECT>,
     cache: HashMap<String, (CompositionDrawingSurface, i32, i32)>,
     edit: bool,
     gallery: Option<Gallery>,
@@ -335,6 +336,7 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
                 display_size: display.size(),
                 appearance: WidgetAppearance::current(),
                 list: Vec::new(),
+                control_center_area: None,
                 cache: HashMap::new(),
                 edit: false,
                 gallery: None,
@@ -362,7 +364,34 @@ pub fn open_gallery() {
     with(|m| m.open_gallery());
 }
 
+pub fn set_control_center_area(area: Option<RECT>) {
+    with(|m| {
+        m.control_center_area = area;
+        m.sync_visibility();
+    });
+}
+
 impl Mgr {
+    fn widget_visible(&self, pos: (i32, i32), size: (f32, f32)) -> bool {
+        !crate::fullscreen::active()
+            && !self.control_center_area.is_some_and(|area| {
+                pos.0 < area.right
+                    && pos.1 < area.bottom
+                    && pos.0 + size.0.ceil() as i32 > area.left
+                    && pos.1 + size.1.ceil() as i32 > area.top
+            })
+    }
+
+    fn sync_visibility(&self) {
+        for widget in &self.list {
+            if self.widget_visible(widget.pos, widget.size) {
+                widget.popup.show();
+            } else {
+                widget.popup.hide();
+            }
+        }
+    }
+
     fn pitch(&self) -> i32 {
         ((widgets::CELL + widgets::GAP) * self.dpi).round() as i32
     }
@@ -544,7 +573,7 @@ impl Mgr {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             );
         }
-        if !crate::fullscreen::active() {
+        if self.widget_visible(pos, (w, h)) {
             popup.show();
         }
         self.list.push(Widget {
@@ -2033,13 +2062,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                     m.finish_close_gallery();
                     m.hide_slot();
                 }
-                for widget in &m.list {
-                    if active {
-                        widget.popup.hide();
-                    } else {
-                        widget.popup.show();
-                    }
-                }
+                m.sync_visibility();
             });
             LRESULT(0)
         }

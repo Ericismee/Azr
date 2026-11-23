@@ -2230,11 +2230,18 @@ impl Win {
             ],
             _ => vec![(
                 None,
-                vec![RowDef::Toggle(
-                    prefs::tr("Clipboard history in Quick Search"),
-                    s.clipboard_history,
-                    Action::ClipHistory,
-                )],
+                vec![
+                    RowDef::Info(
+                        prefs::tr("Open Quick Search"),
+                        crate::spotlight::shortcut_label()
+                            .unwrap_or_else(|| prefs::tr("Alt + Space is already in use")),
+                    ),
+                    RowDef::Toggle(
+                        prefs::tr("Clipboard history in Quick Search"),
+                        s.clipboard_history,
+                        Action::ClipHistory,
+                    ),
+                ],
             )],
         }
     }

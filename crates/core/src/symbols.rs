@@ -3,6 +3,7 @@ pub enum Sym {
     Wifi,
     Search,
     Control,
+    Activity,
     Stage,
     Info,
     Gear,
@@ -55,6 +56,7 @@ pub fn for_command(id: usize) -> Option<Sym> {
         105 | 809 => Some(Sym::Grid),
         106 | 808 => Some(Sym::Windows),
         104 => Some(Sym::XCircle),
+        108 => Some(Sym::Activity),
         110 => Some(Sym::Moon),
         111 => Some(Sym::Restart),
         112 => Some(Sym::Power),
@@ -421,6 +423,21 @@ fn shape(sym: Sym, p: P) -> bool {
                     ) <= 0.0
                 })
         }
+        Sym::Activity => {
+            let frame = rrect(p, (0.5, 0.5), (0.45, 0.36), 0.11).abs() <= 0.042;
+            let line = poly(
+                p,
+                &[
+                    (0.17, 0.53),
+                    (0.33, 0.53),
+                    (0.43, 0.34),
+                    (0.56, 0.66),
+                    (0.68, 0.46),
+                    (0.83, 0.46),
+                ],
+            ) <= 0.042;
+            frame || line
+        }
         Sym::Stage => {
             let panel = rrect(p, (0.64, 0.5), (0.30, 0.31), 0.09).abs() - 0.036 <= 0.0;
             let card_a = rrect(p, (0.11, 0.5), (0.055, 0.19), 0.04) <= 0.0;
@@ -470,6 +487,7 @@ mod tests {
 
     #[test]
     fn menu_symbols_draw_and_command_map() {
+        assert_eq!(for_command(108), Some(Sym::Activity));
         assert_eq!(for_command(111), Some(Sym::Restart));
         assert_eq!(for_command(999), None);
         for s in [

@@ -250,8 +250,11 @@ fn spring(
     let _ = go();
 }
 
+const SEARCH_SHORTCUT: &str = "Alt + Space";
+
 struct Ctl {
     hwnd: HWND,
+    search_hotkey: bool,
     comp: Compositor,
 }
 
@@ -348,14 +351,14 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
             Some(hi),
             None,
         )?;
-        if RegisterHotKey(
+        let search_hotkey = RegisterHotKey(
             Some(hwnd),
             HOTKEY_ID,
             MOD_ALT | MOD_NOREPEAT,
             VK_SPACE.0 as u32,
         )
-        .is_err()
-        {
+        .is_ok();
+        if !search_hotkey {
             log::line(
                 "spotlight",
                 "Alt+Space is already registered; open Search from the menu or Dock",
@@ -366,6 +369,7 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
         CTL.with(|c| {
             *c.borrow_mut() = Some(Ctl {
                 hwnd,
+                search_hotkey,
                 comp: comp.clone(),
             })
         });
@@ -376,6 +380,15 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
         });
     }
     Ok(())
+}
+
+pub fn shortcut_label() -> Option<&'static str> {
+    CTL.with(|c| {
+        c.borrow()
+            .as_ref()
+            .filter(|ctl| ctl.search_hotkey)
+            .map(|_| SEARCH_SHORTCUT)
+    })
 }
 
 fn sync_launchpad_key(hwnd: HWND) {
@@ -1450,8 +1463,11 @@ impl Spot {
             None => prefs::tr("Quick Search").to_string(),
         };
         let mut avail = t.2 - 72.0 * d;
-        if let Some(m) = self.hover_mode {
-            let key = format!("Ctrl {}", m.digit());
+        let shortcut = self
+            .hover_mode
+            .map(|m| format!("Ctrl {}", m.digit()))
+            .or_else(|| shortcut_label().map(str::to_owned));
+        if let Some(key) = shortcut {
             let kpx = (12.0 * d).round() as i32;
             let kw = self.text_w(&key, kpx, 500) + 14.0 * d;
             let r: Rect = (t.0 + t.2 - kw - 16.0 * d, cy - 11.0 * d, kw, 22.0 * d);

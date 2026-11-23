@@ -351,6 +351,7 @@ impl Cc {
         self.build();
         self.intro = false;
         if let Some(p) = &self.panel {
+            crate::widgets::set_control_center_area(Some(self.work));
             let _ = p.popup.root().SetOpacity(0.0);
             p.popup.show();
         }
@@ -431,6 +432,7 @@ impl Cc {
                 let _ = DestroyWindow(h);
             }
             self.cache.clear();
+            crate::widgets::set_control_center_area(None);
             azr_platform::sys::trim_later(5000);
         }
     }
@@ -726,6 +728,11 @@ impl Cc {
         });
         let rows = if self.edit { rows + 2 } else { rows };
         let dpi = panel_scale(scale, work, self.top, rows);
+        let dpi = if self.edit {
+            dpi.min((work.right - work.left).max(1) as f32 / (GALLERY_WIDTH + 414.0))
+        } else {
+            dpi
+        };
         let (cell, gap) = (82.0 * dpi, 14.0 * dpi);
         let (gw, gh) = (
             4.0 * cell + 3.0 * gap,
@@ -2829,19 +2836,23 @@ fn panel_scale(dpi: f32, work: WorkArea, top: i32, rows: usize) -> f32 {
         .min((height - reserved) as f32 / (rows.max(1) as f32 * 96.0 + 104.0))
 }
 
+const GALLERY_WIDTH: f32 = 670.0;
+
 fn gallery_rect(
     work: WorkArea,
     panel: (i32, i32, i32, i32),
     dpi: f32,
 ) -> (i32, i32, i32, i32, f32) {
-    let available_width = (work.right - work.left).max(1);
+    let left_space = (panel.0 - work.left).max(1);
     let available_height = (work.bottom - work.top).max(1);
+    let gap = ((8.0 * dpi).round() as i32).clamp(1, left_space);
+    let available_width = (left_space - gap).max(1);
     let scale = dpi
-        .min(available_width as f32 / 620.0)
+        .min(available_width as f32 / GALLERY_WIDTH)
         .min(available_height as f32 / 560.0);
-    let width = ((620.0 * scale).round() as i32).clamp(1, available_width);
+    let width = ((GALLERY_WIDTH * scale).round() as i32).clamp(1, available_width);
     let height = ((560.0 * scale).round() as i32).clamp(1, available_height);
-    let x = (panel.0 - width - (8.0 * scale).round() as i32).clamp(work.left, work.right - width);
+    let x = (panel.0 - width - gap).max(work.left);
     let y = panel.1.clamp(work.top, work.bottom - height);
     (x, y, width, height, scale)
 }
@@ -3143,7 +3154,8 @@ mod placement_tests {
             bottom: 940,
         };
         let (x, y, w, h, scale) = gallery_rect(work, (-340, 720, 330, 200), 2.0);
-        assert!(x >= work.left && x + w <= work.right);
+        assert!(x >= work.left && x + w < -340);
+        assert!(w as f32 >= (226.0 + 3.0 * 130.0 + 2.0 * 14.0) * scale);
         assert!(y >= work.top && y + h <= work.bottom);
         assert!(x < 0 && scale < 2.0);
     }

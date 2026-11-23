@@ -54,8 +54,8 @@ Trong ảnh Task Manager này, Azr hiển thị **6,6 MB** bộ nhớ và **0,1%
 
 Yêu cầu **Windows 11 x64 (Intel/AMD)**. Hai gói đều có sẵn thư viện Visual C++ cần thiết, font và logo; không cần cài Rust, Visual Studio, .NET hay Visual C++ Redistributable riêng.
 
-- **[Bản cài đặt EXE](https://github.com/Ericismee/Azr/releases/download/v0.1.4/Azr-Setup-0.1.4-x64.exe):** Chạy trình cài, sau đó mở Azr từ Start Menu. Ứng dụng được cài cho tài khoản hiện tại tại `%LOCALAPPDATA%\Programs\Azr`.
-- **[Bản portable đầy đủ](https://github.com/Ericismee/Azr/releases/download/v0.1.4/Azr-0.1.4-windows-x64-portable-complete.zip):** Giải nén toàn bộ ZIP rồi mở `azr.exe`. Giữ nguyên hai EXE, các DLL, thư mục `fonts` và `brand` đi kèm.
+- **[Bản cài đặt EXE](https://github.com/Ericismee/Azr/releases/download/v0.1.5/Azr-Setup-0.1.5-x64.exe):** Chạy trình cài, sau đó mở Azr từ Start Menu. Ứng dụng được cài cho tài khoản hiện tại tại `%LOCALAPPDATA%\Programs\Azr`.
+- **[Bản portable đầy đủ](https://github.com/Ericismee/Azr/releases/download/v0.1.5/Azr-0.1.5-windows-x64-portable-complete.zip):** Giải nén toàn bộ ZIP rồi mở `azr.exe`. Giữ nguyên hai EXE, các DLL, thư mục `fonts` và `brand` đi kèm.
 
 Các gói chạy không chứa mã nguồn hay tệp debug. Thành phần hệ thống và driver đồ họa của Windows vẫn cần hoạt động bình thường. Windows 10, máy 32-bit và ARM chưa được xác nhận hỗ trợ. EXE chưa được ký số; xem `SHA256SUMS.txt` trong [release](https://github.com/Ericismee/Azr/releases/latest) để đối chiếu tệp tải về. Hướng dẫn tự build nằm tại [đây](docs/BUILD.md).
 

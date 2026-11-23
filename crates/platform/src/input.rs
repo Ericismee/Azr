@@ -54,6 +54,12 @@ pub fn begin_dismiss(rect: (i32, i32, i32, i32), target: isize, msg: u32) {
     }
 }
 
+pub fn end_dismiss_for(target: isize, msg: u32) {
+    if TARGET.load(Ordering::Relaxed) == target && MSG.load(Ordering::Relaxed) == msg {
+        end_dismiss();
+    }
+}
+
 pub fn end_dismiss() {
     let h = HOOK.swap(0, Ordering::Relaxed);
     if h != 0 {
