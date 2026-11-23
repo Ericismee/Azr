@@ -154,6 +154,7 @@ pub struct MediaView<'a> {
 #[derive(Default)]
 pub struct Live {
     pub bars: Vec<SpriteVisual>,
+    pub timeline: Option<Timeline>,
     pub lyric: Option<SpriteVisual>,
     pub lyric_scroll: Option<windows::UI::Composition::ContainerVisual>,
     pub lyric_shift: f32,
@@ -843,6 +844,103 @@ fn mmss(ms: i64) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
+pub struct Timeline {
+    layer: ContainerVisual,
+    sx: f32,
+    sw: f32,
+    sy: f32,
+}
+
+impl Timeline {
+    pub fn update(&self, p: &mut Painter, pos_ms: i64, dur_ms: i64, drag: Option<f32>) {
+        let c = &self.layer;
+        if let Ok(children) = c.Children() {
+            let _ = children.RemoveAll();
+        }
+        let (sx, sw, sy) = (self.sx, self.sw, self.sy);
+        let th = p.px(5.0);
+        let frac = drag
+            .unwrap_or(if dur_ms > 0 {
+                pos_ms as f32 / dur_ms as f32
+            } else {
+                0.0
+            })
+            .clamp(0.0, 1.0);
+        p.rect(
+            c,
+            sx,
+            sy - th / 2.0,
+            (sw * frac).max(th),
+            th,
+            th / 2.0,
+            white(236),
+        );
+        let kx = sx + sw * frac;
+        if drag.is_some() {
+            let (kw, kh) = (p.px(28.0), p.px(18.0));
+            p.rect(
+                c,
+                kx - kw / 2.0,
+                sy - kh / 2.0,
+                kw,
+                kh,
+                kh / 2.0,
+                white(125),
+            );
+            p.rect(
+                c,
+                kx - kw / 2.0 + p.px(1.5),
+                sy - kh / 2.0 + p.px(1.5),
+                kw - p.px(3.0),
+                kh - p.px(3.0),
+                (kh - p.px(3.0)) / 2.0,
+                white(40),
+            );
+        } else {
+            let (kw, kh) = (p.px(18.0), p.px(12.0));
+            p.rect(
+                c,
+                kx - kw / 2.0,
+                sy - kh / 2.0,
+                kw,
+                kh,
+                kh / 2.0,
+                white(250),
+            );
+        }
+        let pos = if let Some(fr) = drag {
+            (dur_ms as f32 * fr) as i64
+        } else {
+            pos_ms
+        };
+        let ty = sy + p.px(8.0);
+        p.text(
+            c,
+            &mmss(pos),
+            sx,
+            ty,
+            10.5,
+            500,
+            WHITE,
+            0.55,
+            Anchor::Left,
+            sw / 2.0,
+        );
+        p.text(
+            c,
+            &format!("-{}", mmss(dur_ms - pos)),
+            sx + sw,
+            ty,
+            10.5,
+            500,
+            WHITE,
+            0.55,
+            Anchor::Right,
+            sw / 2.0,
+        );
+    }
+}
+
 fn music_card(
     p: &mut Painter,
     c: &ContainerVisual,
@@ -852,6 +950,7 @@ fn music_card(
     h: f32,
     m: &MediaView,
     regions: &mut Vec<Region>,
+    live: &mut Live,
 ) {
     let tint = m.tint;
     let bg = match tint {
@@ -931,56 +1030,16 @@ fn music_card(
     let (sx, sw) = (x + pad, w - 2.0 * pad);
     let sy = ay + art + p.px(14.0);
     let th = p.px(5.0);
-    let frac = m
-        .drag
-        .unwrap_or(if m.dur_ms > 0 {
-            m.pos_ms as f32 / m.dur_ms as f32
-        } else {
-            0.0
-        })
-        .clamp(0.0, 1.0);
     p.rect(c, sx, sy - th / 2.0, sw, th, th / 2.0, white(52));
-    p.rect(
-        c,
-        sx,
-        sy - th / 2.0,
-        (sw * frac).max(th),
-        th,
-        th / 2.0,
-        white(236),
-    );
-    let kx = sx + sw * frac;
-    if m.drag.is_some() {
-        let (kw, kh) = (p.px(28.0), p.px(18.0));
-        p.rect(
-            c,
-            kx - kw / 2.0,
-            sy - kh / 2.0,
-            kw,
-            kh,
-            kh / 2.0,
-            white(125),
-        );
-        p.rect(
-            c,
-            kx - kw / 2.0 + p.px(1.5),
-            sy - kh / 2.0 + p.px(1.5),
-            kw - p.px(3.0),
-            kh - p.px(3.0),
-            (kh - p.px(3.0)) / 2.0,
-            white(40),
-        );
-    } else {
-        let (kw, kh) = (p.px(18.0), p.px(12.0));
-        p.rect(
-            c,
-            kx - kw / 2.0,
-            sy - kh / 2.0,
-            kw,
-            kh,
-            kh / 2.0,
-            white(250),
-        );
+    if let Ok(layer) = p.comp.CreateContainerVisual() {
+        if c.Children()
+            .and_then(|children| children.InsertAtTop(&layer))
+            .is_ok()
+        {
+            let timeline = Timeline { layer, sx, sw, sy };
+            timeline.update(p, m.pos_ms, m.dur_ms, m.drag);
+            live.timeline = Some(timeline);
+        }
     }
     if m.can_seek && m.dur_ms > 0 {
         regions.push(Region {
@@ -992,37 +1051,6 @@ fn music_card(
             vis: None,
         });
     }
-    let pos = if let Some(fr) = m.drag {
-        (m.dur_ms as f32 * fr) as i64
-    } else {
-        m.pos_ms
-    };
-    let ty = sy + p.px(8.0);
-    p.text(
-        c,
-        &mmss(pos),
-        sx,
-        ty,
-        10.5,
-        500,
-        WHITE,
-        0.55,
-        Anchor::Left,
-        sw / 2.0,
-    );
-    p.text(
-        c,
-        &format!("-{}", mmss(m.dur_ms - pos)),
-        sx + sw,
-        ty,
-        10.5,
-        500,
-        WHITE,
-        0.55,
-        Anchor::Right,
-        sw / 2.0,
-    );
-
     let cy = y + h - p.px(20.0);
     let cx = x + w / 2.0;
     let gap = p.px(48.0);
@@ -1335,7 +1363,7 @@ fn play(
     let lw = f.w - 2.0 * pad - mw - gap;
     let (mx, lx) = (f.x0 + pad, f.x0 + pad + mw + gap);
     match &d.media {
-        Some(m) => music_card(p, c, mx, top, mw, h, m, regions),
+        Some(m) => music_card(p, c, mx, top, mw, h, m, regions, live),
         None => {
             card(p, c, mx, top, mw, h);
             p.sym(

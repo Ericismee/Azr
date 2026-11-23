@@ -2,6 +2,7 @@ use crate::popup::Popup;
 use azr_platform::text::{render, Style};
 use azr_platform::wins::thumbnail;
 use azr_ui::gfx::Gfx;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -64,6 +65,17 @@ pub enum Hit {
     Close(isize),
 }
 
+#[derive(Default)]
+struct RetainedThumbnails(HashMap<isize, isize>);
+
+impl Drop for RetainedThumbnails {
+    fn drop(&mut self) {
+        for handle in self.0.values().copied() {
+            thumbnail::unregister(handle);
+        }
+    }
+}
+
 struct Cell {
     left: i32,
     right: i32,
@@ -78,6 +90,7 @@ pub struct Preview {
     cells: Vec<Cell>,
     dpi: f32,
     bounds: (i32, i32, i32, i32),
+    windows: Vec<(isize, String, bool)>,
 }
 
 impl Preview {
@@ -100,6 +113,7 @@ impl Preview {
             cells: vec![],
             dpi,
             bounds,
+            windows: Vec::new(),
         })
     }
 
@@ -120,10 +134,10 @@ impl Preview {
         cx: i32,
         bottom: i32,
     ) -> Result<()> {
-        self.clear();
         let d = self.dpi;
         let n = windows.len();
         if n == 0 {
+            self.hide();
             return Ok(());
         }
         let (pad, gap, title_h) = ((12.0 * d) as i32, (6.0 * d) as i32, (26.0 * d) as i32);
@@ -133,7 +147,34 @@ impl Preview {
         let stride = th + gap + title_h + pad;
         let h = pad + rows as i32 * stride;
         let x = (cx - w / 2).clamp(left + 4, (right - w - 4).max(left + 4));
-        self.popup.set_rect(x, (bottom - h).max(top), w, h)?;
+        let rect = (x, (bottom - h).max(top), w, h);
+        let (_, _, previous_width, previous_height) = self.popup.rect;
+        if self.popup.rect != rect {
+            self.popup.set_rect(rect.0, rect.1, rect.2, rect.3)?;
+        }
+        if self.is_visible()
+            && self.windows == windows
+            && previous_width == w
+            && previous_height == h
+        {
+            return Ok(());
+        }
+        self.windows.clear();
+        let mut retained = RetainedThumbnails::default();
+        for cell in self.cells.drain(..) {
+            if let Some(handle) = cell.thumb {
+                if windows.iter().any(|(hwnd, _, _)| *hwnd == cell.hwnd) {
+                    if let Some(previous) = retained.0.insert(cell.hwnd, handle) {
+                        thumbnail::unregister(previous);
+                    }
+                } else {
+                    thumbnail::unregister(handle);
+                }
+            }
+        }
+        if let Ok(children) = self.popup.content.Children() {
+            let _ = children.RemoveAll();
+        }
         self.popup.panel.set_radius(18.0 * d)?;
         let style = Style {
             px: (12.0 * d).round() as i32,
@@ -142,15 +183,17 @@ impl Preview {
         for (i, (hwnd, title, minimized)) in windows.iter().enumerate() {
             let x0 = pad + (i % cols) as i32 * (tw + pad);
             let row_y = pad + (i / cols) as i32 * stride;
-            let thumb = thumbnail::register(self.popup.hwnd.0 as isize, *hwnd).and_then(|handle| {
-                match thumbnail::source_size(handle) {
+            let thumb = retained
+                .0
+                .remove(hwnd)
+                .or_else(|| thumbnail::register(self.popup.hwnd.0 as isize, *hwnd))
+                .and_then(|handle| match thumbnail::source_size(handle) {
                     Some((w, h)) if w > 0 && h > 0 => Some((handle, w, h)),
                     _ => {
                         thumbnail::unregister(handle);
                         None
                     }
-                }
-            });
+                });
             let close_size = title_h.min(tw);
             let title_y = row_y + th + gap;
             let close_x = x0 + tw - close_size;
@@ -260,6 +303,7 @@ impl Preview {
                 self.popup.content.Children()?.InsertAtTop(&stroke)?;
             }
         }
+        self.windows = windows.to_vec();
         self.popup.show();
         Ok(())
     }
@@ -269,6 +313,7 @@ impl Preview {
     }
 
     fn clear(&mut self) {
+        self.windows.clear();
         for c in self.cells.drain(..) {
             if let Some(t) = c.thumb {
                 thumbnail::unregister(t);

@@ -2,9 +2,9 @@ use crate::popup::Popup;
 use crate::prefs;
 use azr_core::mission::{grid, Rect};
 use azr_platform::icons::Bitmap;
+use azr_platform::log;
 use azr_platform::text::{measure, render, Style};
 use azr_platform::wins::{enumerate, focus, snapshot, thumbnail, tracker};
-use azr_platform::{log, sys};
 use azr_ui::gfx::Gfx;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -33,6 +33,7 @@ struct Tile {
     from: Rect,
     to: Rect,
     title: String,
+    last_rect: Option<(i32, i32, i32, i32)>,
 }
 
 struct Mc {
@@ -42,6 +43,9 @@ struct Mc {
     dpi: f32,
     tiles: Vec<Tile>,
     t0: Instant,
+    refresh_hz: u32,
+    intervals: Option<Vec<f32>>,
+    last_tick: Option<Instant>,
     done: bool,
     hover: Option<usize>,
     highlight: SpriteVisual,
@@ -163,7 +167,12 @@ pub fn show() {
                 m.t0 = Instant::now();
                 m.step();
                 unsafe {
-                    SetTimer(Some(m.popup.hwnd), T_ANIM, 16, None);
+                    SetTimer(
+                        Some(m.popup.hwnd),
+                        T_ANIM,
+                        (1000 / m.refresh_hz).max(USER_TIMER_MINIMUM),
+                        None,
+                    );
                 }
             });
         }
@@ -188,7 +197,9 @@ pub fn close() {
 }
 
 fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
-    let screen = sys::screen_size();
+    let display = crate::display::selected();
+    let screen = display.size();
+    let (ox, oy) = display.origin();
     let mut look = prefs::look(prefs::Role::Dark);
     look.blur_sigma = look.blur_sigma.max(20.0);
     look.tint = [120, 12, 14, 18];
@@ -201,8 +212,8 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
         prefs::apply(base, &look),
         true,
     )?;
+    popup.set_rect(ox, oy, screen.0, screen.1)?;
     let dpi = unsafe { GetDpiForWindow(popup.hwnd) }.max(96) as f32 / 96.0;
-    popup.set_rect(0, 0, screen.0, screen.1)?;
     popup.panel.set_radius(0.0)?;
     let dst = popup.hwnd.0 as isize;
 
@@ -232,8 +243,8 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
             hwnd: w.hwnd,
             handle,
             from: Rect {
-                x: fx as f32,
-                y: fy as f32,
+                x: (fx - ox) as f32,
+                y: (fy - oy) as f32,
                 w: fw as f32,
                 h: fh as f32,
             },
@@ -244,6 +255,7 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
                 h: 0.0,
             },
             title,
+            last_rect: None,
         });
     }
     if tiles.is_empty() {
@@ -270,6 +282,9 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
         dpi,
         tiles,
         t0: Instant::now(),
+        refresh_hz: display.refresh_hz(),
+        intervals: std::env::var_os("AZR_FRAME_LOG").map(|_| Vec::with_capacity(24)),
+        last_tick: None,
         done: false,
         hover: None,
         highlight,
@@ -289,7 +304,13 @@ impl Mc {
     fn step(&mut self) {
         let t = (self.t0.elapsed().as_secs_f32() * 1000.0 / ANIM_MS).clamp(0.0, 1.0);
         let e = 1.0 - (1.0 - t).powi(3);
-        for tile in &self.tiles {
+        if let Some(intervals) = self.intervals.as_mut() {
+            let now = Instant::now();
+            if let Some(last) = self.last_tick.replace(now) {
+                intervals.push((now - last).as_secs_f32() * 1000.0);
+            }
+        }
+        for tile in &mut self.tiles {
             let (f, to) = (tile.from, tile.to);
             let r = (
                 lerp(f.x, to.x, e).round() as i32,
@@ -297,12 +318,28 @@ impl Mc {
                 (lerp(f.x, to.x, e) + lerp(f.w, to.w, e)).round() as i32,
                 (lerp(f.y, to.y, e) + lerp(f.h, to.h, e)).round() as i32,
             );
-            thumbnail::place(tile.handle, r, 255);
+            if tile.last_rect != Some(r) {
+                thumbnail::place(tile.handle, r, 255);
+                tile.last_rect = Some(r);
+            }
         }
         if t >= 1.0 && !self.done {
             self.done = true;
             unsafe {
                 let _ = KillTimer(Some(self.popup.hwnd), T_ANIM);
+            }
+            if let Some(mut samples) = self.intervals.take().filter(|values| !values.is_empty()) {
+                samples.sort_by(f32::total_cmp);
+                let median = samples[samples.len() / 2];
+                let max = samples[samples.len() - 1];
+                log::line(
+                    "overview",
+                    &format!(
+                        "refresh_hz={} samples={} median_ms={median:.1} max_ms={max:.1}",
+                        self.refresh_hz,
+                        samples.len()
+                    ),
+                );
             }
             self.draw_desktops();
         }

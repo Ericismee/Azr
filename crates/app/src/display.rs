@@ -1,7 +1,8 @@
 use windows::core::BOOL;
 use windows::Win32::Foundation::{LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
+    EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, DEVMODEW, ENUM_CURRENT_SETTINGS,
+    HDC, HMONITOR, MONITORINFOEXW,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 
@@ -32,6 +33,29 @@ impl Display {
             self.bounds.right,
             self.bounds.bottom,
         )
+    }
+
+    pub fn refresh_hz(self) -> u32 {
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = size_of::<MONITORINFOEXW>() as u32;
+        let mut mode = DEVMODEW {
+            dmSize: size_of::<DEVMODEW>() as u16,
+            ..Default::default()
+        };
+        let ok = unsafe {
+            GetMonitorInfoW(self.monitor, &mut info.monitorInfo).as_bool()
+                && EnumDisplaySettingsW(
+                    windows::core::PCWSTR(info.szDevice.as_ptr()),
+                    ENUM_CURRENT_SETTINGS,
+                    &mut mode,
+                )
+                .as_bool()
+        };
+        if ok && mode.dmDisplayFrequency > 1 {
+            mode.dmDisplayFrequency
+        } else {
+            60
+        }
     }
 
     pub fn dpi(self) -> f32 {

@@ -258,6 +258,7 @@ pub struct Notch {
     art: Option<CompositionDrawingSurface>,
     tint: Option<[u8; 3]>,
     loopback: Option<Loopback>,
+    bands_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
     live_vis: views::Live,
     seek_drag: Option<(f32, f32, f32)>,
 
@@ -411,6 +412,7 @@ impl Notch {
                 art: None,
                 tint: None,
                 loopback: None,
+                bands_pending: Default::default(),
                 live_vis: views::Live::default(),
                 seek_drag: None,
                 album: String::new(),
@@ -1416,17 +1418,32 @@ impl Notch {
     }
 
     fn sync_visualizer(&mut self) {
-        let want =
-            self.has_media && self.playing && self.shown && !self.overlap.fullscreen && !self.off;
+        let want = self.has_media
+            && self.playing
+            && self.shown
+            && !self.overlap.fullscreen
+            && !self.off
+            && !self.live_vis.bars.is_empty();
         if want && self.loopback.is_none() {
             let hw = self.hwnd.0 as isize;
-            self.loopback = Some(loopback::start(move || post(hw, WM_BANDS)));
+            let pending = self.bands_pending.clone();
+            self.loopback = Some(loopback::start(move || {
+                if !pending.swap(true, Ordering::AcqRel) {
+                    let sent = unsafe {
+                        PostMessageW(Some(HWND(hw as *mut _)), WM_BANDS, WPARAM(0), LPARAM(0))
+                    };
+                    if sent.is_err() {
+                        pending.store(false, Ordering::Release);
+                    }
+                }
+            }));
         } else if !want && self.loopback.is_some() {
             self.loopback = None;
         }
     }
 
     fn on_bands(&mut self) {
+        self.bands_pending.store(false, Ordering::Release);
         if self.overlap.fullscreen {
             return;
         }
@@ -1441,8 +1458,22 @@ impl Notch {
         }
     }
 
+    fn update_progress(&mut self) {
+        let pos = self.position_ms();
+        if let Some(timeline) = &self.live_vis.timeline {
+            timeline.update(
+                &mut self.paint,
+                pos,
+                self.dur_ms,
+                self.seek_drag.map(|(_, _, fraction)| fraction),
+            );
+        }
+    }
+
     fn sync_progress(&self) {
         if self.mode == Mode::Open(Tab::Play)
+            && !self.overlap.fullscreen
+            && self.shown
             && self.has_media
             && self.playing
             && self.seek_drag.is_none()
@@ -1461,7 +1492,8 @@ impl Notch {
             self.regions.iter().find(|r| r.hit(x, y)).map(|r| r.action)
         {
             self.seek_drag = Some((sx, sw, ((x - sx) / sw).clamp(0.0, 1.0)));
-            self.render();
+            self.update_progress();
+            self.sync_progress();
             return true;
         }
         false
@@ -1470,7 +1502,8 @@ impl Notch {
     fn on_drag(&mut self, x: f32) {
         if let Some((sx, sw, _)) = self.seek_drag {
             self.seek_drag = Some((sx, sw, ((x - sx) / sw).clamp(0.0, 1.0)));
-            self.render();
+            self.update_progress();
+            self.sync_progress();
         }
     }
 
@@ -1484,7 +1517,8 @@ impl Notch {
             self.pos_ms = ms;
             self.pos_at = Instant::now();
         }
-        self.render();
+        self.update_progress();
+        self.sync_progress();
         self.schedule_lyric();
         true
     }
@@ -2117,6 +2151,7 @@ impl Notch {
                     }
                     self.update_visibility();
                     self.sync_visualizer();
+                    self.sync_progress();
                 }
             }
             T_RECONF => self.on_reconfigure(),
@@ -2167,8 +2202,9 @@ impl Notch {
                 self.refresh();
             }
             T_PROGRESS => {
-                if self.mode == Mode::Open(Tab::Play) {
-                    self.render();
+                if self.mode == Mode::Open(Tab::Play) && !self.overlap.fullscreen {
+                    self.update_progress();
+                    self.sync_progress();
                 }
             }
             T_MINUTE => {

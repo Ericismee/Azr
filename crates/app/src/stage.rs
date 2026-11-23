@@ -1300,7 +1300,11 @@ impl St {
             return;
         }
         let fg = focus::foreground();
-        if fg == 0 || is_own(fg) || is_desktop(fg) {
+        if fg == 0 || is_desktop(fg) {
+            self.set_strip_shown(true);
+            return;
+        }
+        if is_own(fg) {
             return;
         }
         let Some(strip) = self.strip.as_ref() else {

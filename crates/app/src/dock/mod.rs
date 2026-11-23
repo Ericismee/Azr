@@ -1421,14 +1421,16 @@ impl Dock {
             kill(self.hwnd, TIMER_PREVIEW);
             if slot.is_some() {
                 let preview_up = self.preview.as_ref().is_some_and(|p| p.is_visible());
-                if preview_up {
-                    self.show_preview();
-                    if !self.preview.as_ref().is_some_and(|p| p.is_visible()) {
-                        timer(self.hwnd, TIMER_TIP, 250);
-                    }
+                let running = self.entry_at(x).is_some_and(|(_, entry)| {
+                    matches!(entry, Entry::App(i) if self.items.get(i).is_some_and(|item| item.running()))
+                });
+                if running {
+                    timer(self.hwnd, TIMER_PREVIEW, if preview_up { 85 } else { 280 });
                 } else {
+                    if let Some(preview) = self.preview.as_mut() {
+                        preview.hide();
+                    }
                     timer(self.hwnd, TIMER_TIP, 250);
-                    timer(self.hwnd, TIMER_PREVIEW, 280);
                 }
             }
         }
