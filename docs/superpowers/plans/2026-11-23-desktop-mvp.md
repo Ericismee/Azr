@@ -7,6 +7,12 @@
 - Move Search and Launchpad shell icon loading and Control Center Wi-Fi queries off the UI thread. Remove the Control Center's fixed 60 ms introductory wait and shorten its animation.
 - Route “Force Quit Azr” through Azr's shutdown path so it restores the taskbar and clears its tray icon before exit.
 
+## Monitor placement follow-up
+
+Control Center uses the pointer monitor's work area and DPI when opened. The panel and its editing gallery fit that work area. Its size menu and the network flyouts use absolute monitor coordinates, including negative origins. The main panel closes on a display change so reopening picks up the new configuration. Unit tests cover a tall layout at high DPI and gallery placement on a secondary portrait display.
+
+Physical validation is still needed for mixed DPI, unplugging while a popup is open, and taskbars placed on different edges. Test Dock, menu bar, Dynamic Island and Settings separately because they use their own window placement.
+
 ## References and next steps
 
 - [ABRA changes](https://github.com/abdeealfarizi/abra/commits): **513e874** validates installed font glyphs and moves global hook work off-thread. **f722629** adds monitor selection, per-monitor DPI and unplug recovery. **d49f44e** adds wider GPU/display compatibility and menu refinements. **7786fb8**, **4cf394d** and **13bd2c7** are useful references for the Island header, tasks, Clipboard Stack and layout. Implement only relevant behavior in Azr and review any upstream license requirements before reusing code.

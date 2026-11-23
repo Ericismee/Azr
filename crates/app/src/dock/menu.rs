@@ -310,6 +310,7 @@ pub struct Menu {
     highlight: SpriteVisual,
     dpi: f32,
     screen: (i32, i32),
+    origin: (i32, i32),
     card: Option<Card>,
     closing: bool,
     pop_at: Vector3,
@@ -350,6 +351,7 @@ impl Menu {
             highlight,
             dpi,
             screen,
+            origin: (0, 0),
             card: None,
             closing: false,
             pop_at: Vector3 {
@@ -362,6 +364,11 @@ impl Menu {
 
     pub fn set_card(&mut self, card: Option<Card>) {
         self.card = card;
+    }
+
+    pub fn set_work_area(&mut self, rect: windows::Win32::Foundation::RECT) {
+        self.origin = (rect.left, rect.top);
+        self.screen = (rect.right - rect.left, rect.bottom - rect.top);
     }
 
     pub fn show_card(
@@ -712,12 +719,13 @@ impl Menu {
         let (wi, hi) = (w.ceil() as i32, h.ceil() as i32);
         let anchor = x;
         let x = if right_aligned { x - wi } else { x };
-        let px = x.clamp(4, (self.screen.0 - wi - 4).max(4));
-        let py = if above {
-            (y - hi).clamp(4, (self.screen.1 - hi - 4).max(4))
-        } else {
-            y.clamp(0, (self.screen.1 - hi - 4).max(0))
-        };
+        let px = self.origin.0 + (x - self.origin.0).clamp(4, (self.screen.0 - wi - 4).max(4));
+        let py = self.origin.1
+            + if above {
+                (y - self.origin.1 - hi).clamp(4, (self.screen.1 - hi - 4).max(4))
+            } else {
+                (y - self.origin.1).clamp(0, (self.screen.1 - hi - 4).max(0))
+            };
         self.popup.set_rect(px, py, wi, hi)?;
         self.popup.panel.set_radius(radius)?;
         self.highlight.SetOpacity(0.0)?;

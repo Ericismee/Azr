@@ -438,6 +438,12 @@ impl Net {
             Anchor::Below(x, top) => (x, top, false),
             Anchor::Corner(r, top) => (r, top, true),
         };
+        menu.set_work_area(crate::popup::work_area_at(
+            windows::Win32::Foundation::POINT {
+                x: if right { x.saturating_sub(1) } else { x },
+                y: top,
+            },
+        ));
         if let Err(e) = menu.show_card(&self.comp, gfx, items, x, top, right) {
             azr_platform::log::line("netmenu", &format!("menu gagal: {e}"));
             return;

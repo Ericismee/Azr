@@ -1,7 +1,7 @@
 use azr_ui::glass::{GlassPanel, GlassParams};
 use azr_ui::host::{attach, Surface};
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HINSTANCE, HWND};
+use windows::Win32::Foundation::{HINSTANCE, HWND, POINT, RECT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Composition::{Compositor, ContainerVisual};
@@ -249,5 +249,39 @@ impl Popup {
 
     pub fn is_visible(&self) -> bool {
         unsafe { IsWindowVisible(self.hwnd).as_bool() }
+    }
+}
+
+pub(crate) fn pointer_work_area() -> RECT {
+    let mut point = POINT::default();
+    unsafe {
+        let _ = GetCursorPos(&mut point);
+    }
+    work_area_at(point)
+}
+
+pub(crate) fn work_area_at(point: POINT) -> RECT {
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    unsafe {
+        let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(monitor, &mut info).as_bool()
+            && info.rcWork.right > info.rcWork.left
+            && info.rcWork.bottom > info.rcWork.top
+        {
+            return info.rcWork;
+        }
+    }
+    let (right, bottom) = azr_platform::sys::screen_size();
+    RECT {
+        left: 0,
+        top: 0,
+        right,
+        bottom,
     }
 }

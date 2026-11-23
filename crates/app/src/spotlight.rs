@@ -15,11 +15,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use windows::core::w;
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{
-    CreateRectRgn, GetMonitorInfoW, MonitorFromPoint, SetWindowRgn, MONITORINFO,
-    MONITOR_DEFAULTTONEAREST,
-};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -187,32 +184,6 @@ struct Geo {
 fn fit_scale(dpi: f32, screen: (i32, i32)) -> f32 {
     dpi.min(screen.0 as f32 / 600.0)
         .min(screen.1 as f32 / 380.0)
-}
-
-fn pointer_work_area() -> RECT {
-    unsafe {
-        let mut cursor = POINT::default();
-        let _ = GetCursorPos(&mut cursor);
-        let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
-        let mut info = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        if GetMonitorInfoW(monitor, &mut info).as_bool()
-            && info.rcWork.right > info.rcWork.left
-            && info.rcWork.bottom > info.rcWork.top
-        {
-            info.rcWork
-        } else {
-            let (right, bottom) = sys::screen_size();
-            RECT {
-                left: 0,
-                top: 0,
-                right,
-                bottom,
-            }
-        }
-    }
 }
 
 fn geo(dpi: f32, screen: (i32, i32)) -> Geo {
@@ -495,7 +466,7 @@ fn finish_closing() {
 }
 
 fn create(comp: &Compositor, mode: Mode) -> windows_core::Result<Box<Spot>> {
-    let work = pointer_work_area();
+    let work = crate::popup::pointer_work_area();
     let screen = (work.right - work.left, work.bottom - work.top);
     let glass = prefs::glass((10.0, 10.0), 27.0, prefs::Role::Dock);
     let mut popup = Popup::new_with(

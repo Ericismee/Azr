@@ -1,5 +1,5 @@
 use crate::dock::menu::{Item as MItem, Menu, MENU_CLOSE, MENU_PICK};
-use crate::popup::Popup;
+use crate::popup::{pointer_work_area, Popup};
 use crate::{motion, paths, prefs, services};
 use azr_core::controls::{self, Category, Kind, Placed, Size};
 use azr_core::symbols::{self, Sym};
@@ -13,6 +13,7 @@ use azr_ui::glass::{GlassPanel, GlassParams, Tier};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::core::w;
+use windows::Win32::Foundation::RECT as WorkArea;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -165,6 +166,7 @@ struct Cc {
     art: Option<Bitmap>,
     cache: HashMap<String, (CompositionDrawingSurface, i32, i32)>,
     top: i32,
+    work: WorkArea,
     intro: bool,
     intro_items: Vec<(ContainerVisual, Vector3, u32)>,
     closing: bool,
@@ -234,6 +236,7 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
                 art: None,
                 cache: HashMap::new(),
                 top: 30,
+                work: WorkArea::default(),
                 intro: false,
                 intro_items: Vec::new(),
                 closing: false,
@@ -322,7 +325,8 @@ impl Cc {
     }
 
     fn open(&mut self, top: i32) {
-        self.top = top;
+        self.work = pointer_work_area();
+        self.top = top.max(0);
         self.edit = false;
         if self.gfx.is_none() {
             self.gfx = Gfx::shared(&self.comp).ok();
@@ -683,20 +687,17 @@ impl Cc {
     }
 
     fn build(&mut self) {
-        let old = self.panel.take();
-        let dpi;
-        let popup = match old {
-            Some(mut p) => {
-                if let Ok(k) = p.popup.content.Children() {
-                    let _ = k.RemoveAll();
+        let work = self.work;
+        let mut popup = match self.panel.take() {
+            Some(p) => {
+                if let Ok(children) = p.popup.content.Children() {
+                    let _ = children.RemoveAll();
                 }
-                p.panels.clear();
-                dpi = p.dpi;
                 p.popup
             }
             None => {
                 let base = GlassParams::dark((10.0, 10.0), 0.0);
-                let Ok(popup) = Popup::new(
+                let Ok(mut popup) = Popup::new(
                     &self.comp,
                     w!("AzrControlCenter"),
                     Some(panel_proc),
@@ -705,18 +706,24 @@ impl Cc {
                 ) else {
                     return;
                 };
-                dpi = unsafe { GetDpiForWindow(popup.hwnd) }.max(96) as f32 / 96.0
-                    * prefs::ui_scale();
+                let _ = popup.set_rect(
+                    work.left + (work.right - work.left) / 2,
+                    work.top + (work.bottom - work.top) / 2,
+                    10,
+                    10,
+                );
                 popup
             }
         };
-        let mut popup = popup;
-        let (cell, gap) = (82.0 * dpi, 14.0 * dpi);
+        let scale =
+            unsafe { GetDpiForWindow(popup.hwnd) }.max(96) as f32 / 96.0 * prefs::ui_scale();
         let sizes = self.sizes.clone();
         let (placed, rows) = controls::layout_sized(&self.layout, &|k| {
             *sizes.get(&k).unwrap_or(&k.default_size())
         });
         let rows = if self.edit { rows + 2 } else { rows };
+        let dpi = panel_scale(scale, work, self.top, rows);
+        let (cell, gap) = (82.0 * dpi, 14.0 * dpi);
         let (gw, gh) = (
             4.0 * cell + 3.0 * gap,
             rows as f32 * cell + (rows.max(1) - 1) as f32 * gap,
@@ -729,17 +736,14 @@ impl Cc {
         };
         let top = if inuse.is_empty() { 0.0 } else { 36.0 * dpi };
         let (pw, ph) = (gw, top + gh + 14.0 * dpi + btn_h + 4.0 * dpi);
-        let (sw, _) = azr_platform::sys::screen_size();
-        let x = (sw as f32 - pw - 10.0 * dpi) as i32;
-        let y = self.top + (6.0 * dpi) as i32;
         let m = (8.0 * dpi).round();
         PAD.store(m.to_bits(), std::sync::atomic::Ordering::Relaxed);
-        let _ = popup.set_rect(
-            x - m as i32,
-            y - m as i32,
-            (pw + 2.0 * m).ceil() as i32,
-            (ph + 2.0 * m).ceil() as i32,
-        );
+        let width = (pw + 2.0 * m).ceil() as i32;
+        let height = (ph + 2.0 * m).ceil() as i32;
+        let x = (work.right - width - (2.0 * dpi).ceil() as i32).max(work.left);
+        let y = (work.top + self.top + (6.0 * dpi - m).round() as i32)
+            .clamp(work.top, (work.bottom - height).max(work.top));
+        let _ = popup.set_rect(x, y, width, height);
         let _ = popup.panel.set_rect(0.0, 0.0, 0.0, 0.0);
         let _ = popup.content.SetOffset(Vector3 { X: m, Y: m, Z: 0.0 });
         let content = popup.content.clone();
@@ -1889,6 +1893,7 @@ impl Cc {
         ];
         self.menu_kind = Some(kind);
         if let Some(m) = self.menu.as_mut() {
+            m.set_work_area(self.work);
             let _ = m.show(
                 &self.comp,
                 gfx,
@@ -2301,7 +2306,7 @@ impl Cc {
 
     fn open_gallery(&mut self) {
         let Some(p) = self.panel.as_ref() else { return };
-        let dpi = p.dpi;
+        let (x, y, w, h, dpi) = gallery_rect(self.work, p.popup.rect, p.dpi);
         let base = GlassParams::dark((10.0, 10.0), 26.0 * dpi);
         let look = prefs::look(prefs::Role::Dark);
         let Ok(mut popup) = Popup::new_with(
@@ -2314,10 +2319,7 @@ impl Cc {
         ) else {
             return;
         };
-        let (gw, gh) = (620.0 * dpi, 560.0 * dpi);
-        let rect = p.popup.rect;
-        let x = (rect.0 as f32 + pad() - gw - 16.0 * dpi).max(10.0 * dpi);
-        let _ = popup.set_rect(x as i32, rect.1 + pad() as i32, gw as i32, gh as i32);
+        let _ = popup.set_rect(x, y, w, h);
         let _ = popup.panel.set_radius(26.0 * dpi);
         self.gallery = Some(Gallery {
             popup,
@@ -2816,12 +2818,41 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
     }
 }
 
+fn panel_scale(dpi: f32, work: WorkArea, top: i32, rows: usize) -> f32 {
+    let width = (work.right - work.left).max(1);
+    let height = (work.bottom - work.top).max(1);
+    let reserved = top.clamp(0, height / 4);
+    dpi.min(width as f32 / 400.0)
+        .min((height - reserved) as f32 / (rows.max(1) as f32 * 96.0 + 104.0))
+}
+
+fn gallery_rect(
+    work: WorkArea,
+    panel: (i32, i32, i32, i32),
+    dpi: f32,
+) -> (i32, i32, i32, i32, f32) {
+    let available_width = (work.right - work.left).max(1);
+    let available_height = (work.bottom - work.top).max(1);
+    let scale = dpi
+        .min(available_width as f32 / 620.0)
+        .min(available_height as f32 / 560.0);
+    let width = ((620.0 * scale).round() as i32).clamp(1, available_width);
+    let height = ((560.0 * scale).round() as i32).clamp(1, available_height);
+    let x = (panel.0 - width - (8.0 * scale).round() as i32).clamp(work.left, work.right - width);
+    let y = panel.1.clamp(work.top, work.bottom - height);
+    (x, y, width, height, scale)
+}
+
 fn xy(lp: LPARAM) -> (f32, f32) {
     ((lp.0 as i16) as f32, ((lp.0 >> 16) as i16) as f32)
 }
 
 unsafe extern "system" fn panel_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
+        WM_DISPLAYCHANGE => {
+            let _ = PostMessageW(Some(hwnd), WM_CLOSE_CC, WPARAM(0), LPARAM(0));
+            LRESULT(0)
+        }
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         m if m == WM_CLOSE_CC => {
             close();
@@ -3079,5 +3110,38 @@ unsafe extern "system" fn gallery_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::{gallery_rect, panel_scale};
+    use windows::Win32::Foundation::RECT;
+
+    #[test]
+    fn tall_panel_scales_to_portrait_work_area() {
+        let work = RECT {
+            left: -720,
+            top: -120,
+            right: 0,
+            bottom: 940,
+        };
+        let dpi = panel_scale(2.5, work, 75, 8);
+        assert!(dpi < 2.5);
+        assert!((8.0 * 96.0 + 104.0) * dpi <= (work.bottom - work.top - 75) as f32);
+    }
+
+    #[test]
+    fn gallery_stays_inside_secondary_monitor_with_negative_coordinates() {
+        let work = RECT {
+            left: -720,
+            top: -120,
+            right: 0,
+            bottom: 940,
+        };
+        let (x, y, w, h, scale) = gallery_rect(work, (-340, 720, 330, 200), 2.0);
+        assert!(x >= work.left && x + w <= work.right);
+        assert!(y >= work.top && y + h <= work.bottom);
+        assert!(x < 0 && scale < 2.0);
     }
 }
