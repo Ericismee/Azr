@@ -463,6 +463,7 @@ impl Notch {
             crate::services::register_island(hwnd);
             tracker::install(on_windows_changed);
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            timer(hwnd, T_WINCHG, 1);
             timer(hwnd, T_START, 1600);
             timer(hwnd, T_MINUTE, azr_platform::time::ms_to_next_minute());
             timer(hwnd, T_PRIVACY, 1500);
@@ -847,6 +848,9 @@ impl Notch {
     }
 
     fn refresh(&mut self) {
+        if self.overlap.fullscreen {
+            return;
+        }
         let look = state::look(self.mode, state::activity(&self.live()));
         if look != self.look || self.first {
             self.transition(look);
@@ -974,6 +978,9 @@ impl Notch {
     }
 
     fn render(&mut self) {
+        if self.overlap.fullscreen {
+            return;
+        }
         let c = self.body.content.clone();
         if let Ok(k) = c.Children() {
             let _ = k.RemoveAll();
@@ -1418,6 +1425,9 @@ impl Notch {
     }
 
     fn on_bands(&mut self) {
+        if self.overlap.fullscreen {
+            return;
+        }
         let b = loopback::latest();
         for (i, bar) in self.live_vis.bars.iter().enumerate() {
             let v = b.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
@@ -1880,6 +1890,22 @@ impl Notch {
         if let Some(s) = &self.strip {
             s.set_visible(!self.overlap.fullscreen && !self.off);
         }
+        if self.overlap.fullscreen {
+            if self.shown || unsafe { IsWindowVisible(self.hwnd).as_bool() } {
+                self.shown = false;
+                self.edge_armed = false;
+                kill(self.hwnd, T_EDGE);
+                kill(self.hwnd, T_DWELL);
+                kill(self.hwnd, T_HIDEWIN);
+                unsafe {
+                    let _ = ShowWindow(self.hwnd, SW_HIDE);
+                }
+                if let Some(sh) = &self.shadow {
+                    sh.set_visible(false);
+                }
+            }
+            return;
+        }
         if hide && self.shown {
             self.shown = false;
             let y = -(self.size.h + self.body.top_over + 8.0 * self.dpi);
@@ -2055,9 +2081,8 @@ impl Notch {
             T_WINCHG => {
                 let mut ov = overlap::evaluate(
                     tracker::external_foreground(),
-                    std::process::id(),
+                    self.hwnd,
                     self.pill_screen_rect(),
-                    sys::screen_size(),
                 );
                 if ov.fullscreen && crate::prefs::get().above_fullscreen {
                     ov = overlap::Overlap {
@@ -2066,7 +2091,11 @@ impl Notch {
                     };
                 }
                 if ov != self.overlap {
+                    let was_fullscreen = self.overlap.fullscreen;
                     self.overlap = ov;
+                    if was_fullscreen && !ov.fullscreen {
+                        self.refresh();
+                    }
                     self.update_visibility();
                     self.sync_visualizer();
                 }
@@ -2308,6 +2337,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             with(hwnd, |d| {
                 d.apply_prefs();
                 d.on_reconfigure();
+                d.on_timer(T_WINCHG);
             });
             LRESULT(0)
         }
@@ -2326,7 +2356,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_OPEN => {
             with(hwnd, |d| {
-                if !d.off && !matches!(d.mode, Mode::Open(_)) {
+                if !d.off && !d.overlap.fullscreen && !matches!(d.mode, Mode::Open(_)) {
                     d.dispatch(Event::Click);
                 }
             });

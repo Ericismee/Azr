@@ -87,7 +87,7 @@ fn parse_args() -> Args {
         open_settings: v.iter().any(|a| a == "--open-settings"),
         settings_page: flag_value(&v, "--settings-page")
             .and_then(|s| s.parse::<u8>().ok())
-            .filter(|v| *v <= 8),
+            .filter(|v| *v <= 9),
         settings_scroll: flag_value(&v, "--settings-scroll")
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(0)
@@ -302,6 +302,7 @@ fn main() {
             DispatchMessageW(&msg);
         }
     }
+    launchpad::shutdown();
     switcher::shutdown();
     stage::shutdown();
     azr_platform::clipboard::shutdown();

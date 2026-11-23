@@ -352,6 +352,8 @@ pub struct Settings {
     pub widget_style: u8,
     pub battery_pct: u8,
     pub menu_logo: u8,
+    pub launchpad_key: u8,
+    pub launchpad_icon: u8,
 }
 
 impl Default for Settings {
@@ -404,13 +406,13 @@ impl Default for Settings {
             stage_titles: true,
             hide_desktop_icons: true,
             dock_plates: true,
-            above_fullscreen: true,
+            above_fullscreen: false,
             clipboard_history: false,
             icon_style: IconStyle::Default,
             icon_tint: 0,
             accent: 0,
             icon_variant: 1,
-            min_effect: 0,
+            min_effect: 2,
             notch_idle: 0,
             greet_name: ShortText::EMPTY,
             greet_text: ShortText::EMPTY,
@@ -427,6 +429,8 @@ impl Default for Settings {
             widget_style: 0,
             battery_pct: 2,
             menu_logo: 1,
+            launchpad_key: 0,
+            launchpad_icon: 0,
         }
     }
 }
@@ -445,6 +449,12 @@ impl Settings {
             };
             let (k, v) = (k.trim(), v.trim());
             match k {
+                "launchpad_key" => {
+                    s.launchpad_key = v.parse::<u8>().ok().filter(|n| *n <= 2).unwrap_or(0);
+                }
+                "launchpad_icon" => {
+                    s.launchpad_icon = v.parse::<u8>().ok().filter(|n| *n <= 3).unwrap_or(0);
+                }
                 "menu_logo" => {
                     s.menu_logo = v
                         .parse::<i32>()
@@ -613,7 +623,7 @@ impl Settings {
                 "min_effect" => {
                     s.min_effect = v
                         .parse::<i32>()
-                        .map(|n| n.clamp(0, 1) as u8)
+                        .map(|n| n.clamp(0, 2) as u8)
                         .unwrap_or(s.min_effect)
                 }
                 "notch_idle" => {
@@ -875,6 +885,10 @@ impl Settings {
             self.icon_background
         ));
         text.push_str(&format!("menu_logo={}\n", self.menu_logo));
+        text.push_str(&format!(
+            "launchpad_key={}\nlaunchpad_icon={}\n",
+            self.launchpad_key, self.launchpad_icon
+        ));
         text
     }
 }
@@ -1343,4 +1357,20 @@ pub fn dock_look(s: &Settings, system_dark: bool) -> Look {
         }
     }
     look
+}
+
+#[cfg(test)]
+mod launchpad_pref_tests {
+    use super::*;
+
+    #[test]
+    fn launchpad_defaults_and_changes_survive_reload() {
+        let defaults = Settings::parse("");
+        assert_eq!(defaults.launchpad_key, 0);
+        assert_eq!(defaults.launchpad_icon, 0);
+        let settings = Settings::parse("launchpad_key=2\nlaunchpad_icon=3\n");
+        let restored = Settings::parse(&settings.serialize());
+        assert_eq!(restored.launchpad_key, 2);
+        assert_eq!(restored.launchpad_icon, 3);
+    }
 }

@@ -9,6 +9,7 @@ use azr_ui::capture::{self, Capture};
 use azr_ui::gfx::Gfx;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -25,6 +26,7 @@ const WM_FG: u32 = WM_APP + 110;
 const WM_LOC: u32 = WM_APP + 111;
 const WM_EDGE_IN: u32 = WM_APP + 112;
 const WM_EDGE_OUT: u32 = WM_APP + 113;
+const WM_SHOT_READY: u32 = WM_APP + 114;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const T_FG: usize = 1;
 const T_FLY: usize = 2;
@@ -67,6 +69,41 @@ struct Fly {
     activate: isize,
 }
 
+type ShotRequest = (String, isize);
+type ShotResult = (String, isize, Option<Bitmap>);
+
+struct ShotWorker {
+    requests: SyncSender<ShotRequest>,
+    results: Receiver<ShotResult>,
+}
+
+impl ShotWorker {
+    fn start(ctl: isize) -> Option<Self> {
+        let (requests, work) = mpsc::sync_channel::<ShotRequest>(4);
+        let (done, results) = mpsc::sync_channel(4);
+        std::thread::Builder::new()
+            .name("stage-previews".into())
+            .spawn(move || {
+                while let Ok((app, hwnd)) = work.recv() {
+                    let bitmap = snapshot::capture(hwnd, 3).map(|shot| shot.bmp);
+                    if done.send((app, hwnd, bitmap)).is_err() {
+                        break;
+                    }
+                    unsafe {
+                        let _ = PostMessageW(
+                            Some(HWND(ctl as *mut _)),
+                            WM_SHOT_READY,
+                            WPARAM(0),
+                            LPARAM(0),
+                        );
+                    }
+                }
+            })
+            .ok()?;
+        Some(Self { requests, results })
+    }
+}
+
 struct St {
     ctl: HWND,
     comp: Compositor,
@@ -77,6 +114,8 @@ struct St {
     model: Stage,
     parked: Vec<(Parked, String)>,
     shots: HashMap<String, Bitmap>,
+    shot_worker: Option<ShotWorker>,
+    shot_pending: HashMap<String, isize>,
     icons: HashMap<String, Option<Bitmap>>,
     strip: Option<StripUi>,
     edge: Option<crate::strip::Strip>,
@@ -184,6 +223,8 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
                 model: Stage::default(),
                 parked: Vec::new(),
                 shots: HashMap::new(),
+                shot_worker: None,
+                shot_pending: HashMap::new(),
                 icons: HashMap::new(),
                 strip: None,
                 edge: None,
@@ -540,15 +581,6 @@ impl St {
                 azr_platform::media::resume_ids(ids);
             }
         }
-        for app in &ch.show {
-            if let Some((p, _)) = self.parked.iter().find(|(_, a)| a == app) {
-                if let Some(shot) = snapshot::capture(p.hwnd, 2) {
-                    if !blank(&shot.bmp) || !self.shots.contains_key(app) {
-                        self.shots.insert(app.clone(), shot.bmp);
-                    }
-                }
-            }
-        }
         for app in &ch.park {
             if excluded(app) {
                 continue;
@@ -571,27 +603,21 @@ impl St {
             }
             for w in wins.iter().filter(|w| key_of(&w.path) == *app) {
                 if focus::is_minimized(w.hwnd)
+                    || unsafe { IsHungAppWindow(HWND(w.hwnd as *mut _)).as_bool() }
                     || park::is_parked(w.hwnd)
                     || self.parked.iter().any(|(p, _)| p.hwnd == w.hwnd)
                 {
                     continue;
                 }
-                if let Some(shot) = snapshot::capture(w.hwnd, 2) {
-                    let first_of_app = !outs.iter().any(|(a, _)| a == app);
-                    let good = !blank(&shot.bmp);
-                    if first_of_app && good && outs.len() < 4 {
+                if self.shots.contains_key(app)
+                    && outs.len() < 4
+                    && !outs.iter().any(|(key, _)| key == app)
+                {
+                    if let Some((x, y, width, height)) = snapshot::frame_rect(w.hwnd) {
                         outs.push((
                             app.clone(),
-                            (
-                                shot.rect.0 as f32,
-                                shot.rect.1 as f32,
-                                shot.rect.2 as f32,
-                                shot.rect.3 as f32,
-                            ),
+                            (x as f32, y as f32, width as f32, height as f32),
                         ));
-                    }
-                    if (first_of_app && good) || !self.shots.contains_key(app) {
-                        self.shots.insert(app.clone(), shot.bmp);
                     }
                 }
                 if let Some(p) = park::park(w.hwnd) {
@@ -1319,36 +1345,33 @@ impl St {
         }
     }
 
-    fn refresh_shots(&mut self) {
+    fn refresh_shots(&mut self, queue: bool) {
         if self.strip.is_none() || self.fly.is_some() {
             return;
         }
+        if self.shot_worker.is_none() {
+            self.shot_worker = ShotWorker::start(self.ctl.0 as isize);
+        }
+        let Some(worker) = &self.shot_worker else {
+            return;
+        };
         let mut need_rebuild = false;
-        let apps: Vec<String> = self
-            .model
-            .strip
-            .iter()
-            .flat_map(|g| g.iter().take(3).cloned())
-            .collect();
-        for app in apps {
-            let Some(hwnd) = self
-                .parked
-                .iter()
-                .find(|(_, a)| *a == app)
-                .map(|(p, _)| p.hwnd)
-            else {
-                continue;
-            };
-            let Some(shot) = snapshot::capture(hwnd, 2) else {
-                continue;
-            };
-            if blank(&shot.bmp) || self.live.get(&app).is_some_and(|c| c.has_frame) {
+        while let Ok((app, hwnd, bitmap)) = worker.results.try_recv() {
+            self.shot_pending.remove(&app);
+            let Some(bitmap) = bitmap else { continue };
+            if blank(&bitmap)
+                || self.live.get(&app).is_some_and(|c| c.has_frame)
+                || !self
+                    .parked
+                    .iter()
+                    .any(|(p, key)| key == &app && p.hwnd == hwnd)
+            {
                 continue;
             }
             let old = self.shots.get(&app).map(|b| (b.w, b.h));
             let same_shape = old
                 .map(|(w, h)| {
-                    ((w as f32 / h.max(1) as f32) - (shot.bmp.w as f32 / shot.bmp.h.max(1) as f32))
+                    ((w as f32 / h.max(1) as f32) - (bitmap.w as f32 / bitmap.h.max(1) as f32))
                         .abs()
                         < 0.02
                 })
@@ -1360,7 +1383,7 @@ impl St {
             if same_shape {
                 if let (Some(strip), Ok(surf)) = (
                     self.strip.as_ref(),
-                    gfx.surface_from_bgra(shot.bmp.w, shot.bmp.h, &shot.bmp.bgra),
+                    gfx.surface_from_bgra(bitmap.w, bitmap.h, &bitmap.bgra),
                 ) {
                     for sl in &strip.slots {
                         for (a, br) in &sl.brushes {
@@ -1375,7 +1398,21 @@ impl St {
             if !done {
                 need_rebuild = true;
             }
-            self.shots.insert(app, shot.bmp);
+            self.shots.insert(app, bitmap);
+        }
+        if queue {
+            for app in self.model.strip.iter().flat_map(|g| g.iter().take(3)) {
+                if self.shot_pending.contains_key(app)
+                    || self.live.get(app).is_some_and(|c| c.has_frame)
+                {
+                    continue;
+                }
+                if let Some((parked, _)) = self.parked.iter().find(|(_, key)| key == app) {
+                    if worker.requests.try_send((app.clone(), parked.hwnd)).is_ok() {
+                        self.shot_pending.insert(app.clone(), parked.hwnd);
+                    }
+                }
+            }
         }
         if need_rebuild {
             self.rebuild();
@@ -1505,6 +1542,14 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             SetTimer(Some(hwnd), T_PEEK, 700, None);
             LRESULT(0)
         }
+        WM_SHOT_READY => {
+            with(|s| {
+                if s.active {
+                    s.refresh_shots(false);
+                }
+            });
+            LRESULT(0)
+        }
         WM_TIMER => {
             match wp.0 {
                 T_FG => {
@@ -1531,7 +1576,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 T_SHOT => {
                     with(|s| {
                         if s.active {
-                            s.refresh_shots();
+                            s.refresh_shots(true);
                         }
                     });
                 }

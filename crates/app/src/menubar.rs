@@ -184,24 +184,6 @@ fn loc_hook(ev: u32, hwnd: isize) {
     }
 }
 
-fn is_fullscreen(hwnd: isize) -> bool {
-    unsafe {
-        let h = HWND(hwnd as *mut _);
-        let mut cls = [0u16; 64];
-        let n = GetClassNameW(h, &mut cls);
-        let cls = String::from_utf16_lossy(&cls[..n.max(0) as usize]);
-        if cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" {
-            return false;
-        }
-        let mut r = windows::Win32::Foundation::RECT::default();
-        if GetWindowRect(h, &mut r).is_err() {
-            return false;
-        }
-        let (sw, sh) = sys::screen_size();
-        r.left <= 0 && r.top <= 0 && r.right >= sw && r.bottom >= sh
-    }
-}
-
 pub fn init(comp: &Compositor) -> windows_core::Result<()> {
     unsafe {
         let hi: HINSTANCE = GetModuleHandleW(None)?.into();
@@ -305,6 +287,7 @@ fn apply_prefs() {
             return;
         }
         with_bar(|b| {
+            b.check_fullscreen();
             b.apply_look();
             b.relayout();
             b.render();
@@ -643,6 +626,9 @@ impl Bar {
     }
 
     fn recheck_color(&mut self) {
+        if self.fullscreen {
+            return;
+        }
         if self.update_text_color() {
             self.cache.clear();
             self.render();
@@ -660,13 +646,16 @@ impl Bar {
         if fg == 0 || fg == self.popup.hwnd.0 as isize {
             return;
         }
-        let full = is_fullscreen(fg) && !prefs::get().above_fullscreen;
+        let full = !prefs::get().above_fullscreen
+            && azr_platform::wins::overlap::fullscreen_on(fg, self.popup.hwnd);
         if full != self.fullscreen {
             self.fullscreen = full;
             if full {
                 self.close_menu();
                 self.popup.hide();
             } else {
+                self.relayout();
+                self.render();
                 self.popup.show();
                 crate::topmost::request_raise();
             }
@@ -683,6 +672,9 @@ impl Bar {
         }
         let mut changed = false;
         self.check_fullscreen();
+        if self.fullscreen {
+            return false;
+        }
         let native = azr_platform::menus::read(fg).unwrap_or_default();
         let titles = |v: &Vec<azr_platform::menus::Top>| {
             v.iter().map(|t| t.title.clone()).collect::<Vec<_>>()
@@ -1287,6 +1279,9 @@ impl Bar {
     }
 
     fn render(&mut self) {
+        if self.fullscreen {
+            return;
+        }
         if let Ok(k) = self.layer.Children() {
             let _ = k.RemoveAll();
         }
@@ -1698,7 +1693,7 @@ impl Bar {
                         ),
                     ),
                     a(808, &prefs::tr("Overview")).with_accel("Ctrl+↑"),
-                    a(809, &prefs::tr("Apps")).with_accel("Ctrl+Shift+Space"),
+                    a(809, &prefs::tr("Apps")).with_accel(crate::launchpad::shortcut_label()),
                     Item::separator(),
                     a(810, &prefs::tr("Azr Settings…")),
                     a(811, &prefs::tr("System Settings…")),
@@ -1711,8 +1706,20 @@ impl Bar {
                 a(102, &prefs::tr("Microsoft Store…")),
                 Item::separator(),
                 a(103, &prefs::tr("Azr Settings…")),
-                a(105, &prefs::tr("Apps")).with_accel("Ctrl+Shift+Space"),
+                a(105, &prefs::tr("Apps")).with_accel(crate::launchpad::shortcut_label()),
                 a(106, &prefs::tr("Overview")).with_accel("Ctrl+↑"),
+                a(
+                    107,
+                    &format!(
+                        "{}{}",
+                        if azr_platform::shell::taskbar::is_hidden() {
+                            "✓ "
+                        } else {
+                            ""
+                        },
+                        prefs::tr("Hide the Windows taskbar")
+                    ),
+                ),
                 a(104, &prefs::tr("Force Quit Azr")),
                 Item::separator(),
                 a(110, &prefs::tr("Sleep")),
@@ -1814,6 +1821,7 @@ impl Bar {
             102 => launch::open("ms-windows-store:"),
             103 => crate::settings_win::open(&self.comp),
             104 => crate::mainwin::request_quit(),
+            107 => crate::mainwin::toggle_taskbar(),
             105 => crate::launchpad::toggle(),
             106 => crate::mission::toggle(),
             110 => confirm_power(

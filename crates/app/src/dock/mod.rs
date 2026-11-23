@@ -165,7 +165,16 @@ pub struct Dock {
     stack_files: Vec<String>,
     items: Vec<Item>,
     signature: Vec<(String, bool, usize, String)>,
-    icon_key: (azr_core::settings::IconStyle, u8, bool, bool, u8, u8),
+    icon_key: (
+        azr_core::settings::IconStyle,
+        u8,
+        bool,
+        bool,
+        u8,
+        u8,
+        u8,
+        u32,
+    ),
     seen: Vec<String>,
 
     entries: Vec<Entry>,
@@ -421,6 +430,8 @@ impl Dock {
                         crate::prefs::icon_dark(),
                         p.icon_round,
                         p.icon_background,
+                        p.launchpad_icon,
+                        crate::menulogo::generation(),
                     )
                 },
                 seen: vec![],
@@ -477,6 +488,7 @@ impl Dock {
             windows::Win32::UI::Shell::DragAcceptFiles(hwnd, true);
             crate::prefs::listen(hwnd);
             tracker::install(on_windows_changed);
+            timer(hwnd, TIMER_WINDOWS, 1);
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             with_dock(hwnd, |d| {
                 d.animate_stage(0.0);
@@ -728,6 +740,24 @@ impl Dock {
         };
         let hide = self.off || should_hide(self.opts.mode, &inputs);
         self.sync_strip();
+        if self.overlap.fullscreen {
+            if self.shown || unsafe { IsWindowVisible(self.hwnd).as_bool() } {
+                self.shown = false;
+                self.edge_armed = false;
+                kill(self.hwnd, TIMER_DWELL);
+                kill(self.hwnd, TIMER_HIDEWIN);
+                self.hide_popups();
+                if let Some(menu) = &self.menu {
+                    menu.hide();
+                }
+                self.menu_open = false;
+                self.pending_menu = None;
+                unsafe {
+                    let _ = ShowWindow(self.hwnd, SW_HIDE);
+                }
+            }
+            return;
+        }
         if hide && self.shown {
             self.shown = false;
             self.hide_popups();
@@ -752,6 +782,19 @@ impl Dock {
     }
 
     pub fn refresh_windows(&mut self) {
+        self.overlap = overlap::evaluate(
+            tracker::external_foreground(),
+            self.hwnd,
+            self.card_screen_rect(),
+        );
+        if self.overlap.fullscreen {
+            if crate::prefs::get().above_fullscreen {
+                self.overlap = Overlap::default();
+            } else {
+                self.update_visibility();
+                return;
+            }
+        }
         let wins = enumerate::list(std::process::id());
         tracker::prune(focus::is_alive);
         let mut items = merge(&self.pins, &wins, &tracker::recent, &mut self.seen);
@@ -766,18 +809,6 @@ impl Dock {
         if sig != self.signature {
             self.signature = sig;
             self.rebuild();
-        }
-        self.overlap = overlap::evaluate(
-            tracker::external_foreground(),
-            std::process::id(),
-            self.card_screen_rect(),
-            self.screen,
-        );
-        if self.overlap.fullscreen && crate::prefs::get().above_fullscreen {
-            self.overlap = overlap::Overlap {
-                overlapped: false,
-                fullscreen: false,
-            };
         }
         self.update_visibility();
     }
@@ -827,12 +858,14 @@ impl Dock {
         }
         self.views.clear();
         let icon = self.m.icon;
-        if !icons::is_themed(LAUNCHPAD_KEY) && !self.surfaces.contains_key(LAUNCHPAD_KEY) {
+        let p = crate::prefs::get();
+        if (p.launchpad_icon != 0 || !icons::is_themed(LAUNCHPAD_KEY))
+            && !self.surfaces.contains_key(LAUNCHPAD_KEY)
+        {
             let px = ((self.m.icon * self.m.max_scale * 1.15) as i32).clamp(64, 256) as u32;
-            let p = crate::prefs::get();
             let data = azr_core::iconplate::style_icon_v(
                 &azr_core::iconplate::round_icon(
-                    &azr_core::iconplate::launchpad_custom(px, p.icon_background),
+                    &crate::launchpad::icon(px, p.launchpad_icon, p.icon_background),
                     px,
                     p.icon_round,
                 ),
@@ -1125,6 +1158,8 @@ impl Dock {
             crate::prefs::icon_dark(),
             s.icon_round,
             s.icon_background,
+            s.launchpad_icon,
+            crate::menulogo::generation(),
         );
         if key != self.icon_key {
             self.icon_key = key;
@@ -2173,10 +2208,12 @@ impl Dock {
             }
             TIMER_RECONF => self.on_reconfigure(),
             TIMER_TRASH => {
-                let full = azr_platform::recycle::is_full();
-                if full != self.trash_full {
-                    self.trash_full = full;
-                    self.update_trash_icon();
+                if !self.overlap.fullscreen {
+                    let full = azr_platform::recycle::is_full();
+                    if full != self.trash_full {
+                        self.trash_full = full;
+                        self.update_trash_icon();
+                    }
                 }
                 timer(self.hwnd, TIMER_TRASH, TRASH_POLL_MS);
             }
@@ -2307,6 +2344,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             with_dock(hwnd, |d| {
                 d.apply_prefs();
                 d.on_reconfigure();
+                timer(hwnd, TIMER_WINDOWS, 1);
             });
             LRESULT(0)
         }

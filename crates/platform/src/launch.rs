@@ -1,9 +1,11 @@
-use windows::core::{w, HSTRING};
+use windows::core::{w, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_ESCAPE,
 };
-use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::Shell::{
+    ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowW, GetForegroundWindow, GetWindowThreadProcessId, PostMessageW, SC_TASKLIST,
     SW_SHOWNORMAL, WM_SYSCOMMAND,
@@ -29,18 +31,35 @@ fn off_thread(job: impl FnOnce() + Send + 'static) {
     }
 }
 
-pub fn open(path: &str) {
-    let path = path.split('?').next().unwrap_or(path).to_string();
-    off_thread(move || unsafe {
-        ShellExecuteW(
-            None,
-            w!("open"),
-            &HSTRING::from(path.as_str()),
-            None,
-            None,
-            SW_SHOWNORMAL,
-        );
+fn shell_options(file: &HSTRING, params: Option<&HSTRING>) -> SHELLEXECUTEINFOW {
+    SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        lpVerb: w!("open"),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: params.map_or(PCWSTR::null(), |p| PCWSTR(p.as_ptr())),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    }
+}
+
+fn dispatch(file: String, params: Option<String>) {
+    off_thread(move || {
+        let target = HSTRING::from(file.as_str());
+        let parameters = params.map(HSTRING::from);
+        let mut exec = shell_options(&target, parameters.as_ref());
+        match unsafe { ShellExecuteExW(&mut exec) } {
+            Ok(()) => crate::log::line("launch", "Windows accepted the launch request"),
+            Err(error) => crate::log::line(
+                "launch",
+                &format!("Windows rejected the launch request: {error}"),
+            ),
+        }
     });
+}
+
+pub fn open(path: &str) {
+    dispatch(path.to_owned(), None);
 }
 
 pub fn is_start_open() -> bool {
@@ -96,18 +115,10 @@ pub fn toggle_start(was_open_at_press: bool) {
 }
 
 pub fn run(file: &str, params: &str) {
-    let file = system_tool(file);
-    let params = params.to_string();
-    off_thread(move || unsafe {
-        ShellExecuteW(
-            None,
-            w!("open"),
-            &HSTRING::from(file.as_str()),
-            &HSTRING::from(params.as_str()),
-            None,
-            windows::Win32::UI::WindowsAndMessaging::SW_HIDE,
-        );
-    });
+    dispatch(
+        system_tool(file),
+        (!params.is_empty()).then(|| params.to_owned()),
+    );
 }
 
 fn system_tool(file: &str) -> String {
@@ -125,7 +136,24 @@ fn system_tool(file: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::system_tool;
+    use super::*;
+
+    #[test]
+    fn shell_dispatch_keeps_query_strings_and_requests_a_visible_window() {
+        let url = HSTRING::from("https://example.com/?from=azr");
+        let command = shell_options(&url, None);
+        assert_eq!(command.nShow, SW_SHOWNORMAL.0);
+        assert_eq!(
+            unsafe { command.lpFile.to_string() }.unwrap(),
+            "https://example.com/?from=azr"
+        );
+        let parameters = HSTRING::from(r#"/select,"C:\Example.txt""#);
+        let command = shell_options(&url, Some(&parameters));
+        assert_eq!(
+            unsafe { command.lpParameters.to_string() }.unwrap(),
+            parameters.to_string_lossy()
+        );
+    }
 
     #[test]
     fn bare_tools_resolve_to_system32() {

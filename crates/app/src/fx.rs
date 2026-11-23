@@ -1,21 +1,21 @@
 use crate::prefs;
-use azr_platform::wins::park::{self, Parked};
+use azr_platform::wins::park;
 use azr_platform::wins::{enumerate, focus, snapshot, tracker};
 use azr_platform::{log, sys};
 use azr_ui::gfx::Gfx;
 use azr_ui::host::{attach, Host, Surface};
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicIsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use windows::core::w;
 use windows::Foundation::TimeSpan;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Composition::{
-    AnimationDelayBehavior, CompositionDrawingSurface, CompositionEasingFunction,
-    CompositionObject, CompositionStretch, Compositor, ContainerVisual, SpriteVisual,
+    AnimationDelayBehavior, CompositionBitmapInterpolationMode, CompositionDrawingSurface,
+    CompositionEasingFunction, CompositionObject, CompositionStretch, Compositor, ContainerVisual,
+    SpriteVisual,
 };
 use windows_core::{Interface, HSTRING};
 use windows_numerics::{Matrix3x2, Vector2, Vector3};
@@ -27,43 +27,9 @@ const T_HIDE: usize = 3;
 const T_RESTORE: usize = 4;
 
 static FX_HWND: AtomicIsize = AtomicIsize::new(0);
-static FLAGGED: Mutex<Vec<isize>> = Mutex::new(Vec::new());
-static OPEN_PARKED: Mutex<Option<Parked>> = Mutex::new(None);
-const T_OPEN_POLL: usize = 7;
-const T_OPEN_END: usize = 8;
-const OPEN_WAIT_MS: u128 = 320;
+const WM_CAPTURE_READY: u32 = WM_APP + 61;
 
-struct Opening {
-    hwnd: isize,
-    target: (i32, i32, i32, i32),
-    since: std::time::Instant,
-    playing: bool,
-}
-
-fn open_file() -> std::path::PathBuf {
-    crate::paths::config_dir().join("opening.txt")
-}
-
-fn hold_parked(p: Option<Parked>) {
-    let mut g = OPEN_PARKED.lock().unwrap_or_else(|e| e.into_inner());
-    *g = p;
-    match p {
-        Some(p) => park::save(&open_file(), &[p]),
-        None => {
-            let _ = std::fs::remove_file(open_file());
-        }
-    }
-}
-
-fn release_parked() {
-    let p = OPEN_PARKED.lock().unwrap_or_else(|e| e.into_inner()).take();
-    if let Some(p) = p {
-        if park::is_parked(p.hwnd) {
-            park::unpark(&p);
-        }
-    }
-    let _ = std::fs::remove_file(open_file());
-}
+type CaptureResult = Arc<Mutex<Option<(isize, snapshot::Shot)>>>;
 
 #[derive(Clone)]
 struct Snap {
@@ -84,9 +50,8 @@ struct Fx {
     sprite: Option<SpriteVisual>,
     genie: Option<ContainerVisual>,
     pending_restore: Option<(isize, isize)>,
-    seen: HashSet<isize>,
-    opened: HashSet<isize>,
-    opening: Option<Opening>,
+    capture: CaptureResult,
+    capture_pending: bool,
     shadow: Option<ShadowWin>,
     shadow_target: isize,
     shadow_key: (i32, i32, i32),
@@ -112,7 +77,8 @@ fn with_fx<R>(f: impl FnOnce(&mut Fx) -> R) -> Option<R> {
 }
 
 fn enabled() -> bool {
-    prefs::get().anim
+    let p = prefs::get();
+    p.anim && p.min_effect < 2
 }
 
 fn genie_on() -> bool {
@@ -138,13 +104,7 @@ fn hook(event: u32, hwnd: isize) {
 }
 
 pub fn init(host: &Host) -> windows_core::Result<()> {
-    let n = park::restore_file(&open_file());
-    if n > 0 {
-        log::line(
-            "fx",
-            &format!("{n} jendela yang sedang dibuka sesi lalu dikembalikan"),
-        );
-    }
+    restore_all();
     unsafe {
         let hi: HINSTANCE = GetModuleHandleW(None)?.into();
         let class = w!("AzrFx");
@@ -196,9 +156,8 @@ pub fn init(host: &Host) -> windows_core::Result<()> {
                 sprite: None,
                 genie: None,
                 pending_restore: None,
-                seen: HashSet::new(),
-                opened: HashSet::new(),
-                opening: None,
+                capture: Arc::default(),
+                capture_pending: false,
                 shadow: None,
                 shadow_target: 0,
                 shadow_key: (0, 0, 0),
@@ -212,7 +171,6 @@ pub fn init(host: &Host) -> windows_core::Result<()> {
             SetTimer(Some(hwnd), T_REFRESH, 4000, None);
             let fg = focus::foreground();
             if eligible(fg) {
-                flag(fg);
                 with_fx(|fx| fx.current = fg);
                 SetTimer(Some(hwnd), T_CAPTURE, 600, None);
             }
@@ -229,10 +187,10 @@ pub fn init(host: &Host) -> windows_core::Result<()> {
 }
 
 pub fn restore_all() {
-    release_parked();
-    let list: Vec<isize> = std::mem::take(&mut *FLAGGED.lock().unwrap_or_else(|e| e.into_inner()));
-    for h in list {
-        snapshot::set_transitions_disabled(h, false);
+    // Recover windows left off-screen by an interrupted run of an older version.
+    let path = crate::paths::config_dir().join("opening.txt");
+    if path.is_file() {
+        park::restore_file(&path);
     }
 }
 
@@ -257,40 +215,6 @@ fn shadow_bitmap(w: i32, h: i32, m: i32, dy: f32, radius: f32, k: i32) -> (u32, 
         }
     }
     (bw, bh, out)
-}
-
-fn flag(h: isize) {
-    let mut g = FLAGGED.lock().unwrap_or_else(|e| e.into_inner());
-    if !g.contains(&h) {
-        if snapshot::set_transitions_disabled(h, true) {
-            g.push(h);
-            log::line("fx", &format!("transisi DWM dimatikan hwnd={h}"));
-        }
-        if g.len() > 400 {
-            g.retain(|x| focus::is_alive(*x));
-        }
-    }
-}
-
-fn openable(h: isize, screen: (i32, i32)) -> bool {
-    if !eligible(h) || enumerate::cloaked(h) || park::is_parked(h) {
-        return false;
-    }
-    unsafe {
-        let hw = HWND(h as *mut _);
-        if GetAncestor(hw, GA_ROOT) != hw || GetWindow(hw, GW_OWNER).is_ok_and(|o| !o.0.is_null()) {
-            return false;
-        }
-        if IsZoomed(hw).as_bool() || IsIconic(hw).as_bool() {
-            return false;
-        }
-    }
-    match snapshot::frame_rect(h) {
-        Some((x, y, w, hh)) => {
-            w >= 120 && hh >= 80 && !(w >= screen.0 && hh >= screen.1) && x > -2000 && y > -2000
-        }
-        None => false,
-    }
 }
 
 fn eligible(h: isize) -> bool {
@@ -343,8 +267,6 @@ pub fn restore(target: isize, icon: (i32, i32, i32, i32), dock: isize) -> bool {
 enum Kind {
     Minimize,
     Restore,
-    Close,
-    Open,
 }
 
 impl Kind {
@@ -365,8 +287,6 @@ impl Kind {
                     340
                 }
             }
-            Kind::Close => 270,
-            Kind::Open => 300,
         }
     }
 }
@@ -495,6 +415,7 @@ impl Fx {
             let sprite = self.comp.CreateSpriteVisual()?;
             let brush = self.comp.CreateSurfaceBrushWithSurface(&surface)?;
             brush.SetStretch(CompositionStretch::Fill)?;
+            let _ = brush.SetBitmapInterpolationMode(CompositionBitmapInterpolationMode::Linear);
             sprite.SetBrush(&brush)?;
             sprite.SetSize(Vector2 { X: ww, Y: wh })?;
             sprite.SetCenterPoint(Vector3 {
@@ -598,45 +519,6 @@ impl Fx {
                     )?;
                     self.scalar(&obj, "Opacity", &[(0.0, 0.0), (0.12, 1.0), (1.0, 1.0)], ms)?;
                 }
-                Kind::Close => {
-                    sprite.SetOffset(at_win)?;
-                    sprite.SetScale(one)?;
-                    self.vec3(
-                        &obj,
-                        "Scale",
-                        one,
-                        &[(
-                            1.0,
-                            Vector3 {
-                                X: 0.06,
-                                Y: 0.06,
-                                Z: 1.0,
-                            },
-                            (0.33, 0.55),
-                            (0.45, 1.0),
-                        )],
-                        ms,
-                    )?;
-                    self.scalar(&obj, "Opacity", &[(0.0, 1.0), (0.55, 0.92), (1.0, 0.0)], ms)?;
-                }
-                Kind::Open => {
-                    let from = Vector3 {
-                        X: 0.86,
-                        Y: 0.86,
-                        Z: 1.0,
-                    };
-                    sprite.SetOffset(at_win)?;
-                    sprite.SetScale(from)?;
-                    sprite.SetOpacity(0.0)?;
-                    self.vec3(
-                        &obj,
-                        "Scale",
-                        from,
-                        &[(1.0, one, (0.16, 1.0), (0.3, 1.0))],
-                        ms,
-                    )?;
-                    self.scalar(&obj, "Opacity", &[(0.0, 0.0), (0.45, 1.0), (1.0, 1.0)], ms)?;
-                }
             }
             self.sprite = Some(sprite);
             log::line(
@@ -646,8 +528,6 @@ impl Fx {
                     match kind {
                         Kind::Minimize => "minimize",
                         Kind::Restore => "restore",
-                        Kind::Close => "tutup",
-                        Kind::Open => "buka",
                     }
                 ),
             );
@@ -717,6 +597,7 @@ impl Fx {
             let s = self.comp.CreateSpriteVisual()?;
             let b = self.comp.CreateSurfaceBrushWithSurface(&surface)?;
             b.SetStretch(CompositionStretch::Fill)?;
+            let _ = b.SetBitmapInterpolationMode(CompositionBitmapInterpolationMode::Linear);
             b.SetTransformMatrix(Matrix3x2 {
                 M11: 1.0,
                 M12: 0.0,
@@ -774,127 +655,51 @@ impl Fx {
         Ok(())
     }
 
-    fn begin_open(&mut self, h: isize) {
-        if self.opened.contains(&h) || self.opening.as_ref().is_some_and(|o| o.hwnd == h) {
-            return;
-        }
-        if !openable(h, self.screen) {
-            return;
-        }
-        self.opened.insert(h);
-        if self.opened.len() > 600 {
-            self.opened.retain(|x| focus::is_alive(*x));
-        }
-        self.end_open();
-        let Some(target) = snapshot::frame_rect(h) else {
-            return;
-        };
-        flag(h);
-        let Some(p) = park::park(h) else { return };
-        if !park::is_parked(h) {
-            park::unpark(&p);
-            return;
-        }
-        hold_parked(Some(p));
-        self.opening = Some(Opening {
-            hwnd: h,
-            target,
-            since: std::time::Instant::now(),
-            playing: false,
-        });
-        unsafe {
-            SetTimer(Some(self.hwnd), T_OPEN_POLL, 16, None);
-        }
-    }
-
-    fn poll_open(&mut self) {
-        let Some((h, target, waited, playing)) = self
-            .opening
-            .as_ref()
-            .map(|o| (o.hwnd, o.target, o.since.elapsed().as_millis(), o.playing))
-        else {
-            unsafe {
-                let _ = KillTimer(Some(self.hwnd), T_OPEN_POLL);
-            }
-            return;
-        };
-        if playing {
-            return;
-        }
-        if !focus::is_alive(h) || !park::is_parked(h) {
-            self.opening = None;
-            hold_parked(None);
-            unsafe {
-                let _ = KillTimer(Some(self.hwnd), T_OPEN_POLL);
-            }
-            return;
-        }
-        let shot = snapshot::capture(h, 1).filter(|s| !crate::stage::blank(&s.bmp));
-        match shot {
-            Some(shot) => {
-                unsafe {
-                    let _ = KillTimer(Some(self.hwnd), T_OPEN_POLL);
-                }
-                match self
-                    .gfx
-                    .surface_from_bgra(shot.bmp.w, shot.bmp.h, &shot.bmp.bgra)
-                {
-                    Ok(surface) => {
-                        if let Some(o) = self.opening.as_mut() {
-                            o.playing = true;
-                        }
-                        self.play(surface.clone(), target, target, Kind::Open);
-                        self.snap = Some(Snap {
-                            hwnd: h,
-                            rect: target,
-                            surface,
-                        });
-                        unsafe {
-                            SetTimer(
-                                Some(self.hwnd),
-                                T_OPEN_END,
-                                START_DELAY + Kind::Open.ms() - 16,
-                                None,
-                            );
-                        }
-                    }
-                    Err(_) => self.end_open(),
-                }
-            }
-            None if waited > OPEN_WAIT_MS => self.end_open(),
-            None => {}
-        }
-    }
-
-    fn end_open(&mut self) {
-        unsafe {
-            let _ = KillTimer(Some(self.hwnd), T_OPEN_POLL);
-            let _ = KillTimer(Some(self.hwnd), T_OPEN_END);
-        }
-        if self.opening.take().is_some() {
-            release_parked();
-        }
-    }
-
     fn capture_current(&mut self) {
         let h = self.current;
-        if h == 0 || !enabled() || !eligible(h) || focus::is_minimized(h) || park::is_parked(h) {
+        if self.capture_pending
+            || h == 0
+            || !enabled()
+            || !eligible(h)
+            || focus::is_minimized(h)
+            || park::is_parked(h)
+        {
             return;
         }
-        let Some(shot) = snapshot::capture(h, 1) else {
+        let result = Arc::clone(&self.capture);
+        let ctl = self.hwnd.0 as isize;
+        self.capture_pending = std::thread::Builder::new()
+            .name("Azr-window-preview".into())
+            .spawn(move || {
+                let shot = snapshot::capture(h, 1).filter(|shot| !crate::stage::blank(&shot.bmp));
+                *result.lock().unwrap_or_else(|e| e.into_inner()) = shot.map(|shot| (h, shot));
+                unsafe {
+                    let _ = PostMessageW(
+                        Some(HWND(ctl as *mut _)),
+                        WM_CAPTURE_READY,
+                        WPARAM(0),
+                        LPARAM(0),
+                    );
+                }
+            })
+            .is_ok();
+    }
+
+    fn finish_capture(&mut self) {
+        self.capture_pending = false;
+        let result = self
+            .capture
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        let Some((h, shot)) = result else { return };
+        if h != self.current || !enabled() || !focus::is_alive(h) {
             return;
-        };
+        }
         if let Ok(surface) = self
             .gfx
             .surface_from_bgra(shot.bmp.w, shot.bmp.h, &shot.bmp.bgra)
         {
-            log::line(
-                "fx",
-                &format!(
-                    "tangkap hwnd={h} {}x{} (px {}x{})",
-                    shot.rect.2, shot.rect.3, shot.bmp.w, shot.bmp.h
-                ),
-            );
             self.snap = Some(Snap {
                 hwnd: h,
                 rect: shot.rect,
@@ -918,11 +723,8 @@ impl Fx {
             return;
         }
         match event {
-            tracker::EV_SHOW | tracker::EV_UNCLOAKED => self.begin_open(h),
             tracker::EV_FOREGROUND => {
                 if eligible(h) {
-                    flag(h);
-                    self.seen.insert(h);
                     self.current = h;
                     unsafe {
                         SetTimer(Some(self.hwnd), T_CAPTURE, 350, None);
@@ -950,20 +752,11 @@ impl Fx {
             }
             tracker::EV_DESTROY => {
                 self.parked.retain(|p| p.hwnd != h);
-                self.opened.remove(&h);
-                if self.opening.as_ref().is_some_and(|o| o.hwnd == h) {
-                    self.opening = None;
-                    hold_parked(None);
+                if self.snap.as_ref().is_some_and(|s| s.hwnd == h) {
+                    self.snap = None;
                 }
-                if let Some(s) = &self.snap {
-                    if s.hwnd == h && !focus::is_alive(h) {
-                        let (surface, rect) = (s.surface.clone(), s.rect);
-                        self.play(surface, rect, rect, Kind::Close);
-                        self.snap = None;
-                        if self.current == h {
-                            self.current = 0;
-                        }
-                    }
+                if self.current == h {
+                    self.current = 0;
                 }
             }
             _ => {}
@@ -1184,14 +977,12 @@ impl Fx {
                 if self.current == 0 {
                     let fg = focus::foreground();
                     if eligible(fg) {
-                        flag(fg);
                         self.current = fg;
                         SetTimer(Some(self.hwnd), T_CAPTURE, 200, None);
                     }
                 }
             } else {
                 let _ = KillTimer(Some(self.hwnd), T_REFRESH);
-                self.end_open();
                 self.snap = None;
                 self.hide_overlay();
                 restore_all();
@@ -1203,6 +994,10 @@ impl Fx {
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_CAPTURE_READY => {
+            with_fx(Fx::finish_capture);
+            LRESULT(0)
+        }
         WM_FX => {
             with_fx(|fx| fx.on_event(wp.0 as u32, lp.0));
             LRESULT(0)
@@ -1214,7 +1009,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_TIMER => {
             let id = wp.0;
             match id {
-                T_HIDE | T_CAPTURE | T_RESTORE | T_SHADOW | T_OPEN_END => {
+                T_HIDE | T_CAPTURE | T_RESTORE | T_SHADOW => {
                     let _ = KillTimer(Some(hwnd), id);
                 }
                 _ => {}
@@ -1227,8 +1022,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     }
                 }
                 T_SHADOW_WATCH => fx.watch_shadow(),
-                T_OPEN_POLL => fx.poll_open(),
-                T_OPEN_END => fx.end_open(),
                 T_CAPTURE | T_REFRESH => fx.capture_current(),
                 T_HIDE => {
                     fx.hide_overlay();

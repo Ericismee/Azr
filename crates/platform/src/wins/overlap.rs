@@ -1,10 +1,14 @@
 use std::ffi::c_void;
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
 };
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, HMONITOR, MONITORINFO,
+    MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTOPRIMARY,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClassNameW, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindow,
+    GetClassNameW, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic,
     IsWindowVisible, IsZoomed, GWL_EXSTYLE, GWL_STYLE, WS_CAPTION, WS_EX_TOOLWINDOW,
 };
 
@@ -50,56 +54,120 @@ fn frame_rect(h: HWND) -> Option<RECT> {
     Some(r)
 }
 
-pub fn evaluate(
-    fg: isize,
-    own_pid: u32,
-    dock: (i32, i32, i32, i32),
-    screen: (i32, i32),
-) -> Overlap {
-    let none = Overlap::default();
+fn covers_monitor(frame: RECT, monitor: RECT, maximized: bool, captioned: bool) -> bool {
+    !(maximized && captioned)
+        && frame.left <= monitor.left
+        && frame.top <= monitor.top
+        && frame.right >= monitor.right
+        && frame.bottom >= monitor.bottom
+}
+
+struct Foreground {
+    frame: RECT,
+    maximized: bool,
+    fullscreen: bool,
+}
+
+fn on_monitor(fg: isize, monitor: HMONITOR) -> Option<Foreground> {
     let h = HWND(fg as *mut _);
     unsafe {
         if fg == 0
-            || !IsWindow(Some(h)).as_bool()
+            || monitor.is_invalid()
             || !IsWindowVisible(h).as_bool()
             || IsIconic(h).as_bool()
+            || MonitorFromWindow(h, MONITOR_DEFAULTTONULL) != monitor
         {
-            return none;
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        if pid == std::process::id() || is_shell_class(&class_of(h)) {
+            return None;
+        }
+        if GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0 {
+            return None;
         }
         let mut cloaked = 0u32;
         if DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut c_void, 4)
             .is_ok()
             && cloaked != 0
         {
-            return none;
+            return None;
         }
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(h, Some(&mut pid));
-        if pid == own_pid || is_shell_class(&class_of(h)) {
-            return none;
+        let frame = frame_rect(h)?;
+        let maximized = IsZoomed(h).as_bool();
+        let captioned = (GetWindowLongW(h, GWL_STYLE) as u32 & WS_CAPTION.0) == WS_CAPTION.0;
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        let fullscreen = GetMonitorInfoW(monitor, &mut info).as_bool()
+            && covers_monitor(frame, info.rcMonitor, maximized, captioned);
+        Some(Foreground {
+            frame,
+            maximized,
+            fullscreen,
+        })
+    }
+}
+
+pub fn primary_fullscreen(fg: isize) -> bool {
+    let monitor = unsafe { MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY) };
+    on_monitor(fg, monitor).is_some_and(|window| window.fullscreen)
+}
+
+pub fn fullscreen_on(fg: isize, surface: HWND) -> bool {
+    let monitor = unsafe { MonitorFromWindow(surface, MONITOR_DEFAULTTONULL) };
+    on_monitor(fg, monitor).is_some_and(|window| window.fullscreen)
+}
+
+pub fn evaluate(fg: isize, surface: HWND, area: (i32, i32, i32, i32)) -> Overlap {
+    let monitor = unsafe { MonitorFromWindow(surface, MONITOR_DEFAULTTONULL) };
+    let Some(window) = on_monitor(fg, monitor) else {
+        return Overlap::default();
+    };
+    let r = window.frame;
+    let hit = r.bottom > area.1 && r.top < area.3 && r.right > area.0 && r.left < area.2;
+    Overlap {
+        overlapped: window.fullscreen || window.maximized || hit,
+        fullscreen: window.fullscreen,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+        RECT {
+            left,
+            top,
+            right,
+            bottom,
         }
-        if GetWindowLongW(h, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0 {
-            return none;
-        }
-        let Some(r) = frame_rect(h) else { return none };
-        let (cx, cy) = ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
-        if cx < 0 || cy < 0 || cx >= screen.0 || cy >= screen.1 {
-            return none;
-        }
-        let covers = r.left <= 0 && r.top <= 0 && r.right >= screen.0 && r.bottom >= screen.1;
-        let captioned_max =
-            IsZoomed(h).as_bool() && (GetWindowLongW(h, GWL_STYLE) as u32 & WS_CAPTION.0) != 0;
-        let fullscreen = covers && !captioned_max;
-        if fullscreen || IsZoomed(h).as_bool() {
-            return Overlap {
-                overlapped: true,
-                fullscreen,
-            };
-        }
-        let hit = r.bottom > dock.1 && r.top < dock.3 && r.right > dock.0 && r.left < dock.2;
-        Overlap {
-            overlapped: hit,
-            fullscreen: false,
-        }
+    }
+
+    #[test]
+    fn detects_borderless_fullscreen_on_negative_origin_monitor() {
+        let monitor = rect(-1920, -200, 0, 880);
+        assert!(covers_monitor(monitor, monitor, false, false));
+        assert!(covers_monitor(
+            rect(-1928, -208, 8, 888),
+            monitor,
+            true,
+            false
+        ));
+    }
+
+    #[test]
+    fn rejects_maximized_captioned_windows_and_partial_coverage() {
+        let monitor = rect(0, 0, 1920, 1080);
+        assert!(!covers_monitor(monitor, monitor, true, true));
+        assert!(!covers_monitor(
+            rect(0, 0, 1920, 1040),
+            monitor,
+            false,
+            false
+        ));
     }
 }

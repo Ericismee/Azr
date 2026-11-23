@@ -1,6 +1,7 @@
 use crate::prefs;
 use crate::strip::Strip;
 use azr_core::settings::HotAction;
+use azr_platform::wins::{focus, overlap};
 use azr_platform::{keys, launch, log, sys};
 use std::cell::RefCell;
 use windows::core::w;
@@ -127,7 +128,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             let _ = KillTimer(Some(hwnd), wp.0);
             let down = GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0
                 || GetAsyncKeyState(VK_RBUTTON.0 as i32) < 0;
-            if !down {
+            if !down && !overlap::primary_fullscreen(focus::foreground()) {
                 run(prefs::get().hot[i]);
             }
             LRESULT(0)

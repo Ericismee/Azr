@@ -140,6 +140,13 @@ pub fn set_taskbar_hidden(on: bool) {
     crate::dock::request_appbar_resync();
 }
 
+pub fn toggle_taskbar() {
+    if TAKEOVER_ALLOWED.load(Ordering::Relaxed) {
+        let hidden = taskbar::is_hidden();
+        crate::prefs::update(|s| s.takeover = !hidden);
+    }
+}
+
 fn show_menu(hwnd: HWND) {
     unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
@@ -152,7 +159,7 @@ fn show_menu(hwnd: HWND) {
             menu,
             MF_STRING | check,
             ID_TOGGLE_TASKBAR,
-            w!("Hide taskbar (test)"),
+            &windows::core::HSTRING::from(crate::prefs::tr("Hide the Windows taskbar")),
         );
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, MF_STRING, ID_QUIT, w!("Quit Azr"));
@@ -203,7 +210,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_COMMAND => {
             match wp.0 & 0xFFFF {
-                ID_TOGGLE_TASKBAR => set_taskbar_hidden(!taskbar::is_hidden()),
+                ID_TOGGLE_TASKBAR => toggle_taskbar(),
                 ID_QUIT => {
                     let _ = DestroyWindow(hwnd);
                 }

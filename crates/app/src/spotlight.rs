@@ -21,8 +21,8 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, RegisterHotKey, TrackMouseEvent, UnregisterHotKey, MOD_ALT, MOD_CONTROL,
-    MOD_NOREPEAT, MOD_SHIFT, TME_LEAVE, TRACKMOUSEEVENT, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE,
-    VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
+    MOD_NOREPEAT, MOD_SHIFT, TME_LEAVE, TRACKMOUSEEVENT, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN,
+    VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Color;
@@ -125,6 +125,7 @@ struct Spot {
     screen: (i32, i32),
     mode: Mode,
     query: String,
+    query_selected: bool,
     rows: Vec<Row>,
     sel: usize,
     scroll: usize,
@@ -354,19 +355,7 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
                 "Alt+Space is already registered; open Search from the menu or Dock",
             );
         }
-        if RegisterHotKey(
-            Some(hwnd),
-            HOTKEY_APPS,
-            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
-            VK_SPACE.0 as u32,
-        )
-        .is_err()
-        {
-            log::line(
-                "spotlight",
-                "Ctrl+Shift+Space dipakai program lain; hot key Apps tidak aktif",
-            );
-        }
+        sync_launchpad_key(hwnd);
         let h = hwnd.0 as isize;
         CTL.with(|c| {
             *c.borrow_mut() = Some(Ctl {
@@ -381,6 +370,29 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
         });
     }
     Ok(())
+}
+
+fn sync_launchpad_key(hwnd: HWND) {
+    thread_local! { static BOUND: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) }; }
+    let key = prefs::get().launchpad_key;
+    if BOUND.replace(Some(key)) == Some(key) {
+        return;
+    }
+    crate::launchpad::bind_windows_key(hwnd, key == 1);
+    let (mods, vk) = if key == 2 {
+        (
+            MOD_CONTROL | windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT,
+            b'L' as u32,
+        )
+    } else {
+        (MOD_CONTROL | MOD_SHIFT, VK_SPACE.0 as u32)
+    };
+    unsafe {
+        let _ = UnregisterHotKey(Some(hwnd), HOTKEY_APPS);
+        if RegisterHotKey(Some(hwnd), HOTKEY_APPS, mods | MOD_NOREPEAT, vk).is_err() {
+            log::line("launchpad", "Configured shortcut is already in use");
+        }
+    }
 }
 
 pub fn shutdown() {
@@ -519,6 +531,7 @@ fn create(comp: &Compositor, mode: Mode) -> windows_core::Result<Box<Spot>> {
         screen,
         mode: Mode::Search,
         query: String::new(),
+        query_selected: false,
         rows: vec![],
         sel: 0,
         scroll: 0,
@@ -678,9 +691,18 @@ impl Spot {
         self.cur = t;
     }
 
+    fn query_changed(&mut self) {
+        if matches!(self.mode, Mode::Search | Mode::Files) {
+            self.request_files();
+        }
+        self.rebuild_rows();
+        self.render();
+    }
+
     fn reset_state(&mut self, mode: Mode) {
         self.mode = mode;
         self.query.clear();
+        self.query_selected = false;
         self.sel = 0;
         self.scroll = 0;
         self.cat = None;
@@ -825,6 +847,21 @@ impl Spot {
                     return;
                 }
                 let f = self.filter;
+                let exact_action = f
+                    .is_none()
+                    .then(|| {
+                        let needle = q.to_lowercase();
+                        ACTIONS.iter().position(|a| {
+                            action_title(a).to_lowercase() == needle
+                                || a.title.to_lowercase() == needle
+                                || (!model::key_of(a, &self.quick).is_empty()
+                                    && model::key_of(a, &self.quick).eq_ignore_ascii_case(&q))
+                        })
+                    })
+                    .flatten();
+                if let Some(i) = exact_action {
+                    self.rows.push(self.action_row(i));
+                }
                 if f.is_none() {
                     if let Some(v) = search::eval(&q) {
                         self.rows.push(Row {
@@ -849,6 +886,7 @@ impl Spot {
                     let titles = |a: &model::ActionDef| action_title(a);
                     for i in model::rank_actions(&q, &self.quick, &titles)
                         .into_iter()
+                        .filter(|i| Some(*i) != exact_action)
                         .take(if f.is_some() { 8 } else { 2 })
                     {
                         self.rows.push(self.action_row(i));
@@ -1560,6 +1598,25 @@ impl Spot {
             );
         } else {
             let q = self.query.clone();
+            if self.query_selected {
+                let (width, _) = measure(&q, &Style { px, weight: 400 });
+                self.rect(
+                    &body,
+                    (
+                        tx,
+                        cy - 14.0 * d,
+                        (width as f32 + 4.0 * d).min(w - tx - right_pad - 90.0 * d),
+                        28.0 * d,
+                    ),
+                    5.0 * d,
+                    Color {
+                        A: 100,
+                        R: 64,
+                        G: 132,
+                        B: 255,
+                    },
+                );
+            }
             let qw = self.text(
                 &body,
                 &q,
@@ -2382,6 +2439,7 @@ fn clip_time(at: i64) -> String {
 }
 
 fn run_action(id: &str) {
+    log::line("spotlight", &format!("Run quick action: {id}"));
     match id {
         "note" => launch::run("notepad.exe", ""),
         "timer" => launch::open("ms-clock:"),
@@ -2419,6 +2477,10 @@ fn perform(r: Run) {
 
 unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
+        crate::launchpad::WM_WINDOWS_TAP => {
+            toggle_mode(Mode::Apps);
+            LRESULT(0)
+        }
         WM_HOTKEY => {
             if wp.0 as i32 == HOTKEY_APPS {
                 toggle_mode(Mode::Apps);
@@ -2465,6 +2527,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         m if m == prefs::WM_PREFS => {
+            sync_launchpad_key(hwnd);
             clipboard::set_enabled(prefs::get().clipboard_history);
             LRESULT(0)
         }
@@ -2506,12 +2569,11 @@ unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
                             }
                             return;
                         }
-                        s.query.push(ch);
-                        if matches!(s.mode, Mode::Search | Mode::Files) {
-                            s.request_files();
+                        if std::mem::take(&mut s.query_selected) {
+                            s.query.clear();
                         }
-                        s.rebuild_rows();
-                        s.render();
+                        s.query.push(ch);
+                        s.query_changed();
                     });
                 }
             }
@@ -2525,6 +2587,22 @@ unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
                 }
                 return LRESULT(0);
             }
+            if ctrl_down() && matches!(vk, 0x41 | 0x43 | 0x58) {
+                with_spot(|s| {
+                    if s.editing.is_some() {
+                        return;
+                    }
+                    if vk == 0x41 {
+                        s.query_selected = !s.query.is_empty();
+                        s.render();
+                    } else if s.query_selected && clipboard::copy_text(&s.query) && vk == 0x58 {
+                        s.query.clear();
+                        s.query_selected = false;
+                        s.query_changed();
+                    }
+                });
+                return LRESULT(0);
+            }
             if vk == VK_ESCAPE.0 {
                 let handled = with_spot(|s| {
                     if s.editing.is_some() {
@@ -2533,6 +2611,7 @@ unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
                     }
                     if !s.query.is_empty() {
                         s.query.clear();
+                        s.query_selected = false;
                         s.files.clear();
                         s.rebuild_rows();
                         s.render();
@@ -2548,19 +2627,21 @@ unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
                 if !handled {
                     close();
                 }
-            } else if vk == VK_BACK.0 {
+            } else if vk == VK_BACK.0 || vk == VK_DELETE.0 {
                 with_spot(|s| {
                     if s.editing.is_some() {
                         s.edit_buf.pop();
                         s.render();
                         return;
                     }
-                    s.query.pop();
-                    if matches!(s.mode, Mode::Search | Mode::Files) {
-                        s.request_files();
+                    if std::mem::take(&mut s.query_selected) {
+                        s.query.clear();
+                    } else if vk == VK_BACK.0 {
+                        s.query.pop();
+                    } else {
+                        return;
                     }
-                    s.rebuild_rows();
-                    s.render();
+                    s.query_changed();
                 });
             } else if vk == VK_TAB.0 {
                 with_spot(|s| {

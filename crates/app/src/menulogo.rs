@@ -10,7 +10,11 @@ const EXTS: [&str; 9] = [
 ];
 
 fn file_for(ext: &str) -> PathBuf {
-    paths::config_dir().join(format!("{STEM}.{ext}"))
+    image_file(STEM, ext)
+}
+
+fn image_file(stem: &str, ext: &str) -> PathBuf {
+    paths::config_dir().join(format!("{stem}.{ext}"))
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -28,6 +32,20 @@ fn clear() {
 }
 
 pub fn set(src: &str) -> bool {
+    set_image(STEM, src)
+}
+
+pub(crate) fn launcher_path() -> Option<PathBuf> {
+    EXTS.iter()
+        .map(|e| image_file("launchpad_icon", e))
+        .find(|p| p.exists())
+}
+
+pub(crate) fn set_launcher(src: &str) -> bool {
+    set_image("launchpad_icon", src)
+}
+
+fn set_image(stem: &str, src: &str) -> bool {
     use std::io::{Read, Write};
     const MAX_BYTES: u64 = 8 * 1024 * 1024;
     let ext = Path::new(src)
@@ -73,13 +91,13 @@ pub fn set(src: &str) -> bool {
     }
     drop(staged);
     let valid = azr_platform::wic::decode_logo_file_fit(&temp.to_string_lossy(), 32).is_some();
-    if !valid || std::fs::rename(&temp, file_for(&ext)).is_err() {
+    if !valid || std::fs::rename(&temp, image_file(stem, &ext)).is_err() {
         let _ = std::fs::remove_file(temp);
         return false;
     }
     for old in EXTS {
         if old != ext {
-            let _ = std::fs::remove_file(file_for(old));
+            let _ = std::fs::remove_file(image_file(stem, old));
         }
     }
     GEN.fetch_add(1, Ordering::Relaxed);

@@ -112,6 +112,8 @@ enum Action {
     LyricsOnline,
     LyricsDir,
     Close,
+    ProjectRepo,
+    ProjectSupport,
     Takeover,
     Dock(Behavior),
     Notch(Behavior),
@@ -156,6 +158,8 @@ enum Action {
     Material(bool, Material),
     Slider(u8, f32, f32),
     MenuLogoPick,
+    LaunchpadKey(u8),
+    LaunchpadIcon(u8),
     MenuLogoMode(u8),
     MenuLogoReset,
     UiScale(u8),
@@ -179,6 +183,7 @@ enum RowDef {
     Seg(&'static str, Vec<(&'static str, Action)>, usize),
     Slider(&'static str, u8, u8),
     Pick(&'static str, String, Action),
+    Info(&'static str, &'static str),
     Swatches(&'static str, usize),
     Thumbs(&'static str, Vec<(&'static str, Thumb, Action)>, usize),
     Radios(Vec<(&'static str, Action)>, usize),
@@ -208,6 +213,7 @@ fn row_label(r: &RowDef) -> &'static str {
         RowDef::Toggle(l, ..)
         | RowDef::Seg(l, ..)
         | RowDef::Slider(l, ..)
+        | RowDef::Info(l, ..)
         | RowDef::Pick(l, ..)
         | RowDef::Swatches(l, ..)
         | RowDef::Thumbs(l, ..)
@@ -282,7 +288,7 @@ pub fn open(comp: &Compositor) {
 pub fn open_page(comp: &Compositor, page: u8, scroll: f32) {
     open(comp);
     with_win(|w| {
-        w.tab = page.min(8);
+        w.tab = page.min(9);
         w.scroll = scroll.max(0.0);
         w.history = vec![w.tab];
         w.hpos = 0;
@@ -804,7 +810,7 @@ impl Win {
                 22.0
             }
             RowDef::Slider(..) => 30.0,
-            RowDef::Text(..) | RowDef::Pick(..) => 30.0,
+            RowDef::Text(..) | RowDef::Pick(..) | RowDef::Info(..) => 30.0,
             RowDef::Seg(_, opts, _) => {
                 let widths: Vec<f32> = opts
                     .iter()
@@ -1266,6 +1272,20 @@ impl Win {
                     );
                     self.region(lx, cy, inner * d, 30.0 * d, Action::EditText(*field));
                 }
+                RowDef::Info(_, value) => {
+                    self.text_fit(
+                        c,
+                        value,
+                        lx,
+                        cy + 7.0 * d,
+                        inner * d,
+                        13.5,
+                        500,
+                        look.fg,
+                        1.0,
+                        0,
+                    );
+                }
                 RowDef::Pick(_, value, act) => {
                     self.rect(c, lx, cy, inner * d, 30.0 * d, 8.0 * d, col(look.fg, 25));
                     self.text_fit(
@@ -1369,10 +1389,44 @@ impl Win {
                     ],
                 ),
                 (
+                    Some("Launchpad"),
+                    vec![
+                        RowDef::Seg(
+                            prefs::tr("Launchpad shortcut"),
+                            vec![
+                                ("Ctrl+Shift+Space", Action::LaunchpadKey(0)),
+                                (prefs::tr("Windows key"), Action::LaunchpadKey(1)),
+                                ("Ctrl+Alt+L", Action::LaunchpadKey(2)),
+                            ],
+                            s.launchpad_key as usize,
+                        ),
+                        RowDef::Seg(
+                            prefs::tr("Launchpad icon"),
+                            vec![
+                                (prefs::tr("App grid"), Action::LaunchpadIcon(0)),
+                                ("Windows", Action::LaunchpadIcon(1)),
+                                (prefs::tr("Finder style"), Action::LaunchpadIcon(2)),
+                                (prefs::tr("Your image"), Action::LaunchpadIcon(3)),
+                            ],
+                            s.launchpad_icon as usize,
+                        ),
+                        RowDef::Pick(
+                            prefs::tr("Logo image"),
+                            prefs::tr(if crate::menulogo::launcher_path().is_some() {
+                                "Replace image"
+                            } else {
+                                "Choose image"
+                            })
+                            .to_owned(),
+                            Action::LaunchpadIcon(4),
+                        ),
+                    ],
+                ),
+                (
                     Some(prefs::tr("Windows")),
                     vec![
                         RowDef::Toggle(
-                            prefs::tr("Window animations (minimize, close, open)"),
+                            prefs::tr("Azr minimize and restore effects"),
                             s.anim,
                             Action::Anim,
                         ),
@@ -1395,6 +1449,7 @@ impl Win {
                             vec![
                                 (prefs::tr("Funnel"), Action::MinEffect(0)),
                                 (prefs::tr("Scale"), Action::MinEffect(1)),
+                                ("Windows", Action::MinEffect(2)),
                             ],
                             s.min_effect as usize,
                         ),
@@ -1895,6 +1950,28 @@ impl Win {
                     ),
                 ],
             )],
+            9 => vec![
+                (
+                    Some(prefs::tr("About Azr")),
+                    vec![
+                        RowDef::Info(prefs::tr("Version"), env!("CARGO_PKG_VERSION")),
+                        RowDef::Info(prefs::tr("Developer"), "Ericismee"),
+                        RowDef::Pick(
+                            prefs::tr("Source repository"),
+                            "GitHub - Ericismee/Azr".into(),
+                            Action::ProjectRepo,
+                        ),
+                    ],
+                ),
+                (
+                    Some(prefs::tr("Support the developer")),
+                    vec![RowDef::Pick(
+                        prefs::tr("Support Azr"),
+                        prefs::tr("Open support website").into(),
+                        Action::ProjectSupport,
+                    )],
+                ),
+            ],
             _ => vec![(
                 None,
                 vec![RowDef::Toggle(
@@ -2016,16 +2093,17 @@ impl Win {
             0,
         );
 
-        let pages: [(&'static str, &'static str, [u8; 3], u8); 9] = [
+        let pages: [(&'static str, &'static str, [u8; 3], u8); 10] = [
             (prefs::tr("General"), "\u{E713}", [142, 142, 147], 0),
             (prefs::tr("Dock"), "\u{E7C4}", [10, 132, 255], 1),
-            (prefs::tr("Floating panel"), "\u{E7F4}", [58, 58, 60], 2),
+            (prefs::tr("Dynamic Island"), "\u{E7F4}", [58, 58, 60], 2),
             (prefs::tr("Menu bar"), "\u{E700}", [90, 200, 250], 3),
             (prefs::tr("Appearance"), "\u{E790}", [88, 86, 214], 4),
             (prefs::tr("Window manager"), "\u{E8A0}", [48, 209, 88], 5),
             (prefs::tr("Screen Corners"), "\u{E73F}", [175, 82, 222], 6),
             (prefs::tr("Quick Search"), "\u{E721}", [255, 149, 10], 7),
             (prefs::tr("Widgets"), "\u{E737}", [0, 122, 255], 8),
+            (prefs::tr("About & Support"), "\u{E946}", [68, 110, 183], 9),
         ];
         let mut sy = 140.0 * d;
         self.side.clear();
@@ -2159,6 +2237,25 @@ impl Win {
             look.fg,
             0.65,
             1,
+        );
+
+        self.text(
+            c,
+            concat!("v", env!("CARGO_PKG_VERSION")),
+            SIDEBAR_W * d / 2.0,
+            (H - 25.0) * d,
+            11.0,
+            500,
+            look.fg,
+            0.65,
+            1,
+        );
+        self.region_fixed(
+            14.0 * d,
+            (H - 47.0) * d,
+            (SIDEBAR_W - 28.0) * d,
+            40.0 * d,
+            Action::Tab(9),
         );
 
         let (bx, by, bw, bh) = (CONTENT_X * d, 11.0 * d, 64.0 * d, 28.0 * d);
@@ -2606,7 +2703,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         w.search_focus = false;
                     }
                     0x0D => {
-                        if let Some(t) = (0u8..8).find(|i| w.page_matches(*i, "")) {
+                        if let Some(t) = (0u8..=9).find(|i| w.page_matches(*i, "")) {
                             w.go(t, true);
                             return;
                         }
@@ -2682,10 +2779,18 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Action::NotchSend) => prefs::update(|s| s.notch_send = !s.notch_send),
                 Some(Action::LyricsOnline) => prefs::update(|s| s.lyrics_online = !s.lyrics_online),
 
-                Some(Action::MenuLogoPick) => choose_menu_logo(hwnd),
+                Some(Action::MenuLogoPick) => choose_logo(hwnd, false),
+                Some(Action::LaunchpadKey(key)) => prefs::update(|s| s.launchpad_key = key),
+                Some(Action::LaunchpadIcon(icon)) => {
+                    if icon == 4 || (icon == 3 && crate::menulogo::launcher_path().is_none()) {
+                        choose_logo(hwnd, true);
+                    } else {
+                        prefs::update(|s| s.launchpad_icon = icon);
+                    }
+                }
                 Some(Action::MenuLogoMode(mode)) => {
                     if mode == 2 && crate::menulogo::path().is_none() {
-                        choose_menu_logo(hwnd);
+                        choose_logo(hwnd, false);
                     } else {
                         prefs::update(|s| s.menu_logo = mode.min(2));
                     }
@@ -2733,6 +2838,12 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 Some(Action::IconVariant(v)) => prefs::update(|s| s.icon_variant = v),
                 Some(Action::MinEffect(v)) => prefs::update(|s| s.min_effect = v),
+                Some(Action::ProjectRepo) => {
+                    azr_platform::launch::open("https://github.com/Ericismee/Azr")
+                }
+                Some(Action::ProjectSupport) => {
+                    azr_platform::launch::open("https://ericismee.github.io/Azr/")
+                }
                 Some(Action::Close) => {
                     let _ = PostMessageW(Some(hwnd), WM_CLOSE_SELF, WPARAM(0), LPARAM(0));
                 }
@@ -2848,7 +2959,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
     }
 }
 
-unsafe fn choose_menu_logo(hwnd: HWND) {
+unsafe fn choose_logo(hwnd: HWND, launchpad: bool) {
     let _ = SetWindowPos(
         hwnd,
         Some(HWND_NOTOPMOST),
@@ -2875,8 +2986,19 @@ unsafe fn choose_menu_logo(hwnd: HWND) {
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
     );
     if let Some(p) = picked {
-        if crate::menulogo::set(&p) {
-            prefs::update(|s| s.menu_logo = 2);
+        let saved = if launchpad {
+            crate::menulogo::set_launcher(&p)
+        } else {
+            crate::menulogo::set(&p)
+        };
+        if saved {
+            prefs::update(|s| {
+                if launchpad {
+                    s.launchpad_icon = 3;
+                } else {
+                    s.menu_logo = 2;
+                }
+            });
             prefs::broadcast();
         } else {
             let text = windows::core::HSTRING::from(prefs::tr(
