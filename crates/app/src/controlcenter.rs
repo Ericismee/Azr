@@ -377,6 +377,7 @@ impl Cc {
             crate::widgets::set_control_center_area(Some(self.work));
             let _ = p.popup.root().SetOpacity(0.0);
             p.popup.show();
+            p.popup.raise();
         }
         self.start_intro();
         if self.panel.is_some() && std::env::var_os("AZR_UI_TIMINGS").is_some() {
@@ -2419,6 +2420,7 @@ impl Cc {
         self.refresh_gallery();
         if let Some(g) = &self.gallery {
             g.popup.show();
+            g.popup.raise();
             let _ = motion::pop_in(
                 &self.comp,
                 g.popup.root(),

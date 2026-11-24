@@ -43,6 +43,7 @@ use windows_numerics::Vector3;
 
 pub const WM_ICONS: u32 = WM_APP + 3;
 pub const WM_APPBAR_SYNC: u32 = WM_APP + 4;
+const WM_DOCK_FOREGROUND: u32 = WM_APP + 98;
 const STRIP_ENTER: u32 = WM_APP + 5;
 const STRIP_LEAVE: u32 = WM_APP + 6;
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -265,6 +266,20 @@ fn on_windows_changed() {
     let h = DOCK_HWND.load(Ordering::Relaxed);
     if h != 0 {
         timer(HWND(h as *mut _), TIMER_WINDOWS, 120);
+    }
+}
+
+fn on_foreground_changed(event: u32, _: isize) {
+    let h = DOCK_HWND.load(Ordering::Relaxed);
+    if event == tracker::EV_FOREGROUND && h != 0 {
+        unsafe {
+            let _ = PostMessageW(
+                Some(HWND(h as *mut _)),
+                WM_DOCK_FOREGROUND,
+                WPARAM(0),
+                LPARAM(0),
+            );
+        }
     }
 }
 
@@ -501,6 +516,7 @@ impl Dock {
             windows::Win32::UI::Shell::DragAcceptFiles(hwnd, true);
             crate::prefs::listen(hwnd);
             tracker::install(on_windows_changed);
+            tracker::install_fx(on_foreground_changed);
             timer(hwnd, TIMER_WINDOWS, 1);
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             with_dock(hwnd, |d| {
@@ -738,6 +754,7 @@ impl Dock {
     }
 
     fn smart_should_hide(&mut self) -> bool {
+        let desktop = focus::is_desktop(crate::fullscreen::foreground_for_overlap());
         let hovered = self.cursor_over_dock();
         let busy = hovered
             || self.preview.as_ref().is_some_and(Preview::contains_cursor)
@@ -747,7 +764,7 @@ impl Dock {
             || self.grace
             || self.revealing;
         let delay = Duration::from_secs(u64::from(crate::prefs::get().dock_hide_delay));
-        match self.idle_timer.update(Instant::now(), delay, busy) {
+        match self.idle_timer.update(Instant::now(), delay, busy, desktop) {
             IdleHide::Keep => {
                 if hovered {
                     timer(self.hwnd, TIMER_SMART_HIDE, 150);
@@ -2539,6 +2556,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         crate::fullscreen::WM_FULLSCREEN => {
             with_dock(hwnd, |d| d.refresh_windows());
+            LRESULT(0)
+        }
+        WM_DOCK_FOREGROUND => {
+            with_dock(hwnd, |d| d.update_visibility());
             LRESULT(0)
         }
         crate::prefs::WM_PREFS => {

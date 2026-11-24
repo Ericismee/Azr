@@ -23,9 +23,6 @@ use windows_numerics::{Vector2, Vector3};
 
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const WM_APPCHG: u32 = WM_APP + 70;
-const WM_CLICKWIN: u32 = WM_APP + 74;
-static MOUSE_HOOK: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
-static BAR_CTL: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 const WM_NOTCH: u32 = WM_APP + 71;
 const WM_TEST_NET: u32 = WM_APP + 75;
 const T_CLOCK: usize = 1;
@@ -33,6 +30,7 @@ const T_STATUS: usize = 2;
 const T_APP: usize = 3;
 const T_FS: usize = 4;
 const T_SIG: usize = 5;
+const T_MENU_SWITCH: usize = 6;
 const BAR_W: i32 = 600;
 const APP_W: i32 = 800;
 
@@ -137,51 +135,18 @@ fn recolor(b: &Bitmap, rgb: [u8; 3]) -> Vec<u8> {
     out
 }
 
-fn noop_fg() {
+fn window_event(ev: u32, hwnd: isize) {
     CTL.with(|c| {
         if let Some(ctl) = c.borrow().as_ref() {
             unsafe {
-                let _ = PostMessageW(Some(ctl.hwnd), WM_APPCHG, WPARAM(0), LPARAM(0));
-            }
-        }
-    });
-}
-
-unsafe extern "system" fn ll_mouse(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    if code >= 0 {
-        let m = wp.0 as u32;
-        if m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN {
-            let ctl = BAR_CTL.load(std::sync::atomic::Ordering::Relaxed);
-            if ctl != 0 {
-                let pt = (*(lp.0 as *const MSLLHOOKSTRUCT)).pt;
-                let h = WindowFromPoint(pt);
-                if !h.0.is_null() {
-                    let root = GetAncestor(h, GA_ROOT);
-                    if !root.0.is_null() {
-                        let _ = PostMessageW(
-                            Some(HWND(ctl as *mut _)),
-                            WM_CLICKWIN,
-                            WPARAM(root.0 as usize),
-                            LPARAM(0),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    CallNextHookEx(None, code, wp, lp)
-}
-
-fn loc_hook(ev: u32, hwnd: isize) {
-    if ev == tracker::EV_LOCATION && hwnd != 0 && hwnd == focus::foreground() {
-        CTL.with(|c| {
-            if let Some(ctl) = c.borrow().as_ref() {
-                unsafe {
+                if ev == tracker::EV_FOREGROUND {
+                    let _ = PostMessageW(Some(ctl.hwnd), WM_APPCHG, WPARAM(0), LPARAM(0));
+                } else if ev == tracker::EV_LOCATION && hwnd == focus::foreground() {
                     SetTimer(Some(ctl.hwnd), T_FS, 200, None);
                 }
             }
-        });
-    }
+        }
+    });
 }
 
 pub fn init(comp: &Compositor) -> windows_core::Result<()> {
@@ -215,12 +180,8 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
             })
         });
         prefs::listen(hwnd);
-        tracker::install(noop_fg);
-        tracker::install_fx(loc_hook);
-        BAR_CTL.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
-        if let Ok(h) = SetWindowsHookExW(WH_MOUSE_LL, Some(ll_mouse), None, 0) {
-            MOUSE_HOOK.store(h.0 as isize, std::sync::atomic::Ordering::Relaxed);
-        }
+        tracker::install(|| {});
+        tracker::install_fx(window_event);
         apply_prefs();
     }
     Ok(())
@@ -433,33 +394,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         WM_APPCHG => {
-            SetTimer(Some(hwnd), T_APP, 90, None);
-            LRESULT(0)
-        }
-        WM_CLICKWIN => {
-            let root = wp.0 as isize;
-            let mut cls = [0u16; 64];
-            let n = GetClassNameW(HWND(root as *mut _), &mut cls);
-            let cls = String::from_utf16_lossy(&cls[..n.max(0) as usize]);
-            let mut pid = 0u32;
-            GetWindowThreadProcessId(HWND(root as *mut _), Some(&mut pid));
-            let shell = matches!(
-                cls.as_str(),
-                "Progman"
-                    | "WorkerW"
-                    | "Shell_TrayWnd"
-                    | "Shell_SecondaryTrayWnd"
-                    | "NotifyIconOverflowWindow"
-                    | "TopLevelWindowForOverflowXamlIsland"
-            );
-            if pid != std::process::id() && !shell {
-                with_bar(|b| {
-                    if b.refresh_app_for(root) {
-                        b.relayout();
-                        b.render();
-                    }
-                });
-            }
+            SetTimer(Some(hwnd), T_APP, 35, None);
             LRESULT(0)
         }
         WM_TIMER if wp.0 == T_FS => {
@@ -667,7 +602,7 @@ impl Bar {
     }
 
     fn refresh_app(&mut self) -> bool {
-        self.refresh_app_for(focus::foreground())
+        self.refresh_app_for(crate::fullscreen::foreground_for_overlap())
     }
 
     fn refresh_app_for(&mut self, fg: isize) -> bool {
@@ -676,7 +611,7 @@ impl Bar {
         }
         let mut changed = false;
         self.check_fullscreen();
-        if self.fullscreen || self.open.is_some() {
+        if self.fullscreen || self.open.is_some() || fg == self.native_hwnd {
             return false;
         }
         let native = azr_platform::menus::read(fg).unwrap_or_default();
@@ -1599,6 +1534,9 @@ impl Bar {
     }
 
     fn close_menu(&mut self) {
+        unsafe {
+            let _ = KillTimer(Some(self.popup.hwnd), T_MENU_SWITCH);
+        }
         self.menu.hide();
         self.open = None;
         self.menu_target = None;
@@ -1976,6 +1914,25 @@ fn xy(lp: LPARAM) -> (f32, f32) {
     ((lp.0 as i16) as f32, ((lp.0 >> 16) as i16) as f32)
 }
 
+fn outside_bar((x, y, w, h): (i32, i32, i32, i32), point: LPARAM) -> bool {
+    let (px, py) = xy(point);
+    !(x..x + w).contains(&(px as i32)) || !(y..y + h).contains(&(py as i32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn click_on_another_menu_is_not_an_outside_dismissal() {
+        let bar = (-1920, -100, 1920, 26);
+        let click = |x: i16, y: i16| LPARAM(((y as u16 as u32) << 16 | x as u16 as u32) as isize);
+        assert!(!outside_bar(bar, click(-1750, -90)));
+        assert!(outside_bar(bar, click(-1750, -70)));
+        assert!(outside_bar(bar, click(10, -90)));
+    }
+}
+
 unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_DISPLAYCHANGE => {
@@ -2004,9 +1961,10 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 let id = b.id_at(x);
                 if id != b.hover {
                     b.hover = id;
+                    let _ = KillTimer(Some(hwnd), T_MENU_SWITCH);
                     if let (Some(open), Some(new)) = (b.open, id) {
                         if new != open && Bar::has_menu(new) {
-                            b.open_menu(new);
+                            SetTimer(Some(hwnd), T_MENU_SWITCH, 120, None);
                         }
                     }
                     b.update_capsule();
@@ -2015,6 +1973,7 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         WM_MOUSELEAVE => {
+            let _ = KillTimer(Some(hwnd), T_MENU_SWITCH);
             with_bar(|b| {
                 b.tracking = false;
                 b.hover = None;
@@ -2023,11 +1982,29 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {
+            let _ = KillTimer(Some(hwnd), T_MENU_SWITCH);
             let (x, _) = xy(lp);
             with_bar(|b| {
                 if let Some(id) = b.id_at(x) {
                     b.press_feedback();
                     b.click(id);
+                } else {
+                    b.close_menu();
+                }
+            });
+            LRESULT(0)
+        }
+        WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN => {
+            with_bar(|b| b.close_menu());
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == T_MENU_SWITCH => {
+            let _ = KillTimer(Some(hwnd), T_MENU_SWITCH);
+            with_bar(|b| {
+                if let (Some(open), Some(hover)) = (b.open, b.hover) {
+                    if open != hover && Bar::has_menu(hover) {
+                        b.open_menu(hover);
+                    }
                 }
             });
             LRESULT(0)
@@ -2037,7 +2014,11 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         MENU_CLOSE => {
-            with_bar(|b| b.close_menu());
+            with_bar(|b| {
+                if outside_bar(b.popup.rect, lp) {
+                    b.close_menu();
+                }
+            });
             LRESULT(0)
         }
         WM_NOTCH => {

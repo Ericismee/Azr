@@ -105,6 +105,20 @@ impl Popup {
         }
     }
 
+    pub fn raise(&self) {
+        unsafe {
+            let _ = SetWindowPos(
+                self.hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
+
     pub fn fade_in(&self, comp: &Compositor, from_top: bool) {
         use windows::Foundation::TimeSpan;
         use windows::UI::Composition::{CompositionEasingFunction, CompositionObject};

@@ -1,8 +1,8 @@
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, FlashWindow, GetAncestor, GetForegroundWindow, IsIconic, IsWindow,
-    IsWindowVisible, PostMessageW, SetForegroundWindow, ShowWindow, GA_ROOTOWNER, SW_MINIMIZE,
-    SW_RESTORE, SW_SHOW, WM_CLOSE,
+    BringWindowToTop, FlashWindow, GetAncestor, GetClassNameW, GetForegroundWindow, GetShellWindow,
+    IsIconic, IsWindow, IsWindowVisible, PostMessageW, SetForegroundWindow, ShowWindow, GA_ROOT,
+    GA_ROOTOWNER, SW_MINIMIZE, SW_RESTORE, SW_SHOW, WM_CLOSE,
 };
 
 fn h(x: isize) -> HWND {
@@ -25,6 +25,27 @@ pub fn is_minimized(hwnd: isize) -> bool {
 
 pub fn foreground() -> isize {
     unsafe { GetForegroundWindow().0 as isize }
+}
+
+pub fn is_desktop(hwnd: isize) -> bool {
+    if hwnd == 0 {
+        return false;
+    }
+    unsafe {
+        let root = GetAncestor(h(hwnd), GA_ROOT);
+        if root.0.is_null() {
+            return false;
+        }
+        if root == GetShellWindow() {
+            return true;
+        }
+        let mut class = [0u16; 32];
+        let len = GetClassNameW(root, &mut class).max(0) as usize;
+        matches!(
+            String::from_utf16_lossy(&class[..len]).as_str(),
+            "Progman" | "WorkerW"
+        )
+    }
 }
 
 pub fn activate(target: isize, dock: isize) -> bool {

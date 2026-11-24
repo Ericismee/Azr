@@ -813,6 +813,7 @@ impl Menu {
             self.popup.show();
             self.popup.fade_in(comp, !above);
         }
+        self.raise();
         azr_platform::input::begin_dismiss(
             (px, py, px + wi, py + hi),
             self.target.0 as isize,
@@ -822,17 +823,7 @@ impl Menu {
     }
 
     pub fn raise(&self) {
-        unsafe {
-            let _ = SetWindowPos(
-                self.popup.hwnd,
-                Some(HWND_TOPMOST),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-        }
+        self.popup.raise();
     }
 
     fn end_input(&self) {

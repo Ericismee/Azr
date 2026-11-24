@@ -13,8 +13,14 @@ pub struct IdleTimer {
 }
 
 impl IdleTimer {
-    pub fn update(&mut self, now: Instant, delay: Duration, interacting: bool) -> IdleHide {
-        if interacting {
+    pub fn update(
+        &mut self,
+        now: Instant,
+        delay: Duration,
+        interacting: bool,
+        desktop: bool,
+    ) -> IdleHide {
+        if interacting || desktop {
             self.since = None;
             return IdleHide::Keep;
         }
@@ -110,13 +116,34 @@ mod tests {
         for seconds in [3, 5, 10] {
             let delay = Duration::from_secs(seconds);
             let mut idle = IdleTimer::default();
-            assert_eq!(idle.update(start, delay, false), Wait(delay));
+            assert_eq!(idle.update(start, delay, false, false), Wait(delay));
             assert_eq!(
-                idle.update(start + delay - Duration::from_millis(1), delay, false),
+                idle.update(
+                    start + delay - Duration::from_millis(1),
+                    delay,
+                    false,
+                    false
+                ),
                 Wait(Duration::from_millis(1))
             );
-            assert_eq!(idle.update(start + delay, delay, false), Hide);
+            assert_eq!(idle.update(start + delay, delay, false, false), Hide);
         }
+    }
+
+    #[test]
+    fn returning_to_desktop_reveals_and_resets_the_hide_delay() {
+        let start = Instant::now();
+        let delay = Duration::from_secs(3);
+        let mut idle = IdleTimer::default();
+        assert_eq!(idle.update(start, delay, false, false), Wait(delay));
+        assert_eq!(idle.update(start + delay, delay, false, false), Hide);
+        assert_eq!(idle.update(start + delay * 2, delay, false, true), Keep);
+        assert_eq!(idle.update(start + delay * 3, delay, false, true), Keep);
+        assert_eq!(
+            idle.update(start + delay * 4, delay, false, false),
+            Wait(delay)
+        );
+        assert_eq!(idle.update(start + delay * 5, delay, false, false), Hide);
     }
 
     #[test]
@@ -124,13 +151,13 @@ mod tests {
         let start = Instant::now();
         let delay = Duration::from_secs(3);
         let mut idle = IdleTimer::default();
-        assert_eq!(idle.update(start, delay, false), Wait(delay));
+        assert_eq!(idle.update(start, delay, false, false), Wait(delay));
         assert_eq!(
-            idle.update(start + Duration::from_secs(2), delay, true),
+            idle.update(start + Duration::from_secs(2), delay, true, false),
             Keep
         );
-        assert_eq!(idle.update(start + delay, delay, false), Wait(delay));
-        assert_eq!(idle.update(start + delay * 2, delay, false), Hide);
+        assert_eq!(idle.update(start + delay, delay, false, false), Wait(delay));
+        assert_eq!(idle.update(start + delay * 2, delay, false, false), Hide);
     }
 
     #[test]
@@ -138,14 +165,15 @@ mod tests {
         let start = Instant::now();
         let mut idle = IdleTimer::default();
         assert_eq!(
-            idle.update(start, Duration::from_secs(10), false),
+            idle.update(start, Duration::from_secs(10), false, false),
             Wait(Duration::from_secs(10))
         );
         assert_eq!(
             idle.update(
                 start + Duration::from_secs(4),
                 Duration::from_secs(3),
-                false
+                false,
+                false,
             ),
             Hide
         );
