@@ -12,6 +12,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
@@ -40,14 +41,14 @@ const SIDE_BOTTOM: f32 = H - 48.0;
 
 const PAGES: [(&str, &str, [u8; 3], u8); 10] = [
     ("General", "\u{E713}", [142, 142, 147], 0),
-    ("Dock", "\u{E7C4}", [10, 132, 255], 1),
-    ("Dynamic Island", "\u{E7F4}", [58, 58, 60], 2),
-    ("Menu bar", "\u{E700}", [90, 200, 250], 3),
     ("Appearance", "\u{E790}", [88, 86, 214], 4),
+    ("Dock", "\u{E7C4}", [10, 132, 255], 1),
+    ("Menu bar", "\u{E700}", [90, 200, 250], 3),
+    ("Dynamic Island", "\u{E7F4}", [58, 58, 60], 2),
+    ("Widgets", "\u{E737}", [0, 122, 255], 8),
+    ("Quick Search", "\u{E721}", [255, 149, 10], 7),
     ("Window manager", "\u{E8A0}", [48, 209, 88], 5),
     ("Screen Corners", "\u{E73F}", [175, 82, 222], 6),
-    ("Quick Search", "\u{E721}", [255, 149, 10], 7),
-    ("Widgets", "\u{E737}", [0, 122, 255], 8),
     ("About & Support", "\u{E946}", [68, 110, 183], 9),
 ];
 
@@ -152,6 +153,7 @@ fn frame_pixels(
 
 #[derive(Clone, Copy, Debug)]
 enum Action {
+    ShowChoices(&'static str),
     EditText(u8),
     CaptureShortcut(ShortcutCommand),
     NotchIdle(u8),
@@ -184,6 +186,7 @@ enum Action {
     Clock24,
     BarStyle(u8),
     HotCycle(usize),
+    HotAction(usize, azr_core::settings::HotAction),
     StageOn,
     SwitcherOn,
     StageFlag(u8),
@@ -222,6 +225,7 @@ enum Action {
     NotchShape(bool),
     WidgetStyle(u8),
     WidgetGallery,
+    AddWidget(azr_core::widgets::Kind),
     BatteryPct(u8),
 }
 
@@ -236,7 +240,7 @@ struct Region {
 
 enum RowDef {
     Toggle(&'static str, bool, Action),
-    Seg(&'static str, Vec<(&'static str, Action)>, usize),
+    Choice(&'static str, Vec<(String, Action)>, usize),
     Slider(&'static str, u8, u8),
     Pick(&'static str, String, Action),
     Info(&'static str, &'static str),
@@ -247,6 +251,19 @@ enum RowDef {
     Thumbs(&'static str, Vec<(&'static str, Thumb, Action)>, usize),
     Radios(Vec<(&'static str, Action)>, usize),
     Text(&'static str, String, String, u8),
+}
+
+impl RowDef {
+    fn choice(label: &'static str, choices: Vec<(&'static str, Action)>, selected: usize) -> Self {
+        Self::Choice(
+            label,
+            choices
+                .into_iter()
+                .map(|(name, action)| (name.to_owned(), action))
+                .collect(),
+            selected,
+        )
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -275,7 +292,7 @@ fn row_label(r: &RowDef) -> &'static str {
         }
 
         RowDef::Toggle(l, ..)
-        | RowDef::Seg(l, ..)
+        | RowDef::Choice(l, ..)
         | RowDef::Slider(l, ..)
         | RowDef::Info(l, ..)
         | RowDef::Pick(l, ..)
@@ -397,6 +414,9 @@ pub fn open_page(comp: &Compositor, page: u8, scroll: f32) {
         w.hpos = 0;
         w.render();
     });
+    if page == 9 {
+        crate::updates::check_if_idle();
+    }
 }
 
 fn settings_work_area(hwnd: HWND) -> windows::Win32::Foundation::RECT {
@@ -761,6 +781,9 @@ impl Win {
         self.tab = t;
         self.scroll = 0.0;
         self.render();
+        if t == 9 {
+            crate::updates::check_if_idle();
+        }
     }
 
     fn page_matches(&self, idx: u8, name: &'static str, query: &str) -> bool {
@@ -942,14 +965,7 @@ impl Win {
             RowDef::Corners(_) => 102.0,
             RowDef::ProjectLink(..) => 36.0,
             RowDef::Text(..) | RowDef::Pick(..) | RowDef::Info(..) => 30.0,
-            RowDef::Seg(_, opts, _) => {
-                let widths: Vec<f32> = opts
-                    .iter()
-                    .map(|(s, _)| (self.measured(s, 12.5, 600) + 26.0).max(72.0))
-                    .collect();
-                boxes = flow_controls(width, &widths, 30.0, 6.0);
-                boxes.last().map_or(30.0, |b| b.y + b.h)
-            }
+            RowDef::Choice(..) => 34.0,
             RowDef::Thumbs(_, opts, _) => {
                 let cell = width / opts.len().max(1) as f32;
                 captions = opts
@@ -1094,33 +1110,32 @@ impl Win {
                     );
                     self.region(x0, y, cw, rh, *act);
                 }
-                RowDef::Seg(_, opts, selected) => {
-                    for (i, ((text, act), b)) in opts.iter().zip(boxes).enumerate() {
-                        let (bx, by, bw, bh) = (lx + b.x * d, cy + b.y * d, b.w * d, b.h * d);
-                        let on = i == *selected;
-                        self.rect(
-                            c,
-                            bx,
-                            by,
-                            bw,
-                            bh,
-                            10.0 * d,
-                            col(if on { accent } else { look.fg }, if on { 255 } else { 25 }),
-                        );
-                        self.text_fit(
-                            c,
-                            text,
-                            bx + bw / 2.0,
-                            by + 7.0 * d,
-                            bw - 20.0 * d,
-                            12.5,
-                            if on { 600 } else { 500 },
-                            if on { [255, 255, 255] } else { look.fg },
-                            1.0,
-                            1,
-                        );
-                        self.region(bx, by, bw, bh, *act);
-                    }
+                RowDef::Choice(label, opts, selected) => {
+                    let value = opts.get(*selected).map_or_else(
+                        || {
+                            prefs::tr(if *label == prefs::tr("Desktop widgets") {
+                                "Add widgets"
+                            } else {
+                                "Custom"
+                            })
+                        },
+                        |(name, _)| name.as_str(),
+                    );
+                    self.rect(c, lx, cy, inner * d, 34.0 * d, 8.0 * d, col(look.fg, 30));
+                    self.text_fit(
+                        c,
+                        value,
+                        lx + 12.0 * d,
+                        cy + 8.0 * d,
+                        (inner - 45.0) * d,
+                        12.5,
+                        500,
+                        look.fg,
+                        1.0,
+                        0,
+                    );
+                    self.glyph_icon(c, "\u{E70D}", rx - 16.0 * d, cy + 17.0 * d, 11.0, look.fg);
+                    self.region(lx, cy, inner * d, 34.0 * d, Action::ShowChoices(label));
                 }
                 RowDef::Slider(_, value, id) => {
                     let (min, max, unit) = Self::spec(*id);
@@ -1554,7 +1569,7 @@ impl Win {
                     );
                     self.text(
                         c,
-                        "⌃",
+                        "›",
                         rx - 16.0 * d,
                         cy + 8.0 * d,
                         11.0,
@@ -1649,7 +1664,7 @@ impl Win {
             0 => vec![
                 (
                     None,
-                    vec![RowDef::Seg(
+                    vec![RowDef::choice(
                         prefs::tr("Language"),
                         vec![
                             ("Tiếng Việt", Action::Lang(Lang::Vi)),
@@ -1658,15 +1673,6 @@ impl Win {
                         if s.lang == Lang::Vi { 0 } else { 1 },
                     )],
                 ),
-                (Some(prefs::tr("Custom shortcuts")), {
-                    let mut rows = vec![
-                        self.shortcut_row("Quick Search", ShortcutCommand::Search),
-                        self.shortcut_row("Launchpad shortcut", ShortcutCommand::Launchpad),
-                        self.shortcut_row("Overview", ShortcutCommand::Overview),
-                    ];
-                    rows.extend(self.shortcut_help_row());
-                    rows
-                }),
                 (
                     Some(prefs::tr("System")),
                     vec![
@@ -1693,79 +1699,28 @@ impl Win {
                     ],
                 ),
                 (Some(prefs::tr("Display")), {
-                    let selected = crate::display::selected().id;
-                    let mut rows = vec![RowDef::Pick(
-                        prefs::tr("Azr main display"),
-                        if s.main_display == 0 {
-                            format!("✓ {}", prefs::tr("Windows main display"))
-                        } else {
-                            prefs::tr("Windows main display").to_owned()
-                        },
+                    let mut options = vec![(
+                        prefs::tr("Windows main display").to_owned(),
                         Action::MainDisplay(0),
                     )];
-                    rows.extend(crate::display::list().into_iter().map(|display| {
+                    let displays = crate::display::list();
+                    let selected = displays
+                        .iter()
+                        .position(|d| d.id == s.main_display)
+                        .map_or(0, |i| i + 1);
+                    options.extend(displays.into_iter().map(|display| {
                         let (w, h) = display.size();
-                        let active = s.main_display != 0 && display.id == selected;
-                        let marker = if active { "✓ " } else { "" };
-                        RowDef::Pick(
-                            prefs::tr(if display.primary {
-                                "Windows primary"
-                            } else {
-                                "Secondary display"
-                            }),
-                            format!(
-                                "{marker}{} {} · {w} × {h}",
-                                prefs::tr("Display"),
-                                display.id
-                            ),
+                        (
+                            format!("{} {} · {w} × {h}", prefs::tr("Display"), display.id),
                             Action::MainDisplay(display.id),
                         )
                     }));
-                    rows
+                    vec![RowDef::Choice(
+                        prefs::tr("Azr main display"),
+                        options,
+                        selected,
+                    )]
                 }),
-                (
-                    Some(prefs::tr("Shortcuts and Launchpad")),
-                    vec![
-                        RowDef::Toggle(
-                            prefs::tr("Switch app windows with Alt+`"),
-                            s.mac_shortcuts,
-                            Action::MacKeys,
-                        ),
-                        RowDef::Seg(
-                            prefs::tr("Launchpad shortcut"),
-                            vec![
-                                ("Ctrl+Shift+Space", Action::LaunchpadKey(0)),
-                                (prefs::tr("Windows key"), Action::LaunchpadKey(1)),
-                                ("Ctrl+Alt+L", Action::LaunchpadKey(2)),
-                            ],
-                            if s.shortcuts[ShortcutCommand::Launchpad.index()].is_some() {
-                                usize::MAX
-                            } else {
-                                s.launchpad_key as usize
-                            },
-                        ),
-                        RowDef::Seg(
-                            prefs::tr("Launchpad icon"),
-                            vec![
-                                (prefs::tr("App grid"), Action::LaunchpadIcon(0)),
-                                ("Windows", Action::LaunchpadIcon(1)),
-                                (prefs::tr("Finder style"), Action::LaunchpadIcon(2)),
-                                (prefs::tr("Your image"), Action::LaunchpadIcon(3)),
-                            ],
-                            s.launchpad_icon as usize,
-                        ),
-                        RowDef::Pick(
-                            prefs::tr("Logo image"),
-                            prefs::tr(if crate::menulogo::launcher_path().is_some() {
-                                "Replace image"
-                            } else {
-                                "Choose image"
-                            })
-                            .to_owned(),
-                            Action::LaunchpadIcon(4),
-                        ),
-                    ],
-                ),
                 (
                     Some(prefs::tr("Windows")),
                     vec![
@@ -1787,12 +1742,12 @@ impl Win {
                     None,
                     vec![
                         RowDef::Toggle(prefs::tr("Enable Dock"), s.dock_enabled, Action::DockOn),
-                        RowDef::Seg(
+                        RowDef::choice(
                             prefs::tr("When to show Dock"),
                             behaviors(true),
                             beh_idx(s.dock),
                         ),
-                        RowDef::Seg(
+                        RowDef::choice(
                             prefs::tr("Dock hide delay (Smart mode)"),
                             vec![
                                 (prefs::tr("3 seconds"), Action::DockHideDelay(3)),
@@ -1805,7 +1760,7 @@ impl Win {
                                 _ => 0,
                             },
                         ),
-                        RowDef::Seg(
+                        RowDef::choice(
                             prefs::tr("Minimize effect"),
                             vec![
                                 (prefs::tr("Funnel"), Action::MinEffect(0)),
@@ -1830,7 +1785,7 @@ impl Win {
                 (
                     Some(prefs::tr("Dock surface")),
                     vec![
-                        RowDef::Seg(
+                        RowDef::choice(
                             prefs::tr("Surface style"),
                             vec![
                                 ("Liquid Glass", Action::DockSurface(0)),
@@ -1847,7 +1802,7 @@ impl Win {
                             s.refraction,
                             Action::Refraction,
                         ),
-                        RowDef::Seg(
+                        RowDef::choice(
                             prefs::tr("Icon backplate"),
                             vec![
                                 (prefs::tr("Original"), Action::IconBackground(0)),
@@ -1874,6 +1829,45 @@ impl Win {
                         RowDef::Slider(prefs::tr("Dock corner roundness"), s.dock_round, 2),
                     ],
                 ),
+                (
+                    Some(prefs::tr("Launchpad")),
+                    vec![
+                        self.shortcut_row("Custom shortcut", ShortcutCommand::Launchpad),
+                        RowDef::choice(
+                            prefs::tr("Launchpad shortcut"),
+                            vec![
+                                ("Ctrl+Shift+Space", Action::LaunchpadKey(0)),
+                                (prefs::tr("Windows key"), Action::LaunchpadKey(1)),
+                                ("Ctrl+Alt+L", Action::LaunchpadKey(2)),
+                            ],
+                            if s.shortcuts[ShortcutCommand::Launchpad.index()].is_some() {
+                                usize::MAX
+                            } else {
+                                s.launchpad_key as usize
+                            },
+                        ),
+                        RowDef::choice(
+                            prefs::tr("Launchpad icon"),
+                            vec![
+                                (prefs::tr("App grid"), Action::LaunchpadIcon(0)),
+                                ("Windows", Action::LaunchpadIcon(1)),
+                                (prefs::tr("Finder style"), Action::LaunchpadIcon(2)),
+                                (prefs::tr("Your image"), Action::LaunchpadIcon(3)),
+                            ],
+                            s.launchpad_icon as usize,
+                        ),
+                        RowDef::Pick(
+                            prefs::tr("Logo image"),
+                            prefs::tr(if crate::menulogo::launcher_path().is_some() {
+                                "Replace image"
+                            } else {
+                                "Choose image"
+                            })
+                            .to_owned(),
+                            Action::LaunchpadIcon(4),
+                        ),
+                    ],
+                ),
             ],
             2 => vec![
                 (
@@ -1884,7 +1878,7 @@ impl Win {
                             s.notch_enabled,
                             Action::NotchOn,
                         ),
-                        RowDef::Seg(
+                        RowDef::choice(
                             prefs::tr("Shape"),
                             vec![
                                 (prefs::tr("Floating panel"), Action::NotchShape(false)),
@@ -1892,7 +1886,7 @@ impl Win {
                             ],
                             if s.notch_island { 1 } else { 0 },
                         ),
-                        RowDef::Seg(prefs::tr("Behavior"), behaviors(false), beh_idx(s.notch)),
+                        RowDef::choice(prefs::tr("Behavior"), behaviors(false), beh_idx(s.notch)),
                         RowDef::Slider(prefs::tr("Corner roundness"), s.notch_round, 3),
                         RowDef::Toggle(
                             prefs::tr("Open when the cursor is on the floating panel"),
@@ -1910,7 +1904,7 @@ impl Win {
                     let hour = azr_platform::time::local_now().hour;
                     let auto = azr_core::notch::glance::greeting_text("", &name, hour, s.lang);
                     vec![
-                        RowDef::Seg(
+                        RowDef::choice(
                             prefs::tr("Show"),
                             vec![
                                 (prefs::tr("Greeting & info"), Action::NotchIdle(0)),
@@ -1993,7 +1987,7 @@ impl Win {
                                 s.menubar,
                                 Action::MenuBarOn,
                             ),
-                            RowDef::Seg(
+                            RowDef::choice(
                                 prefs::tr("menu bar background"),
                                 vec![
                                     (prefs::tr("Transparent"), Action::BarStyle(0)),
@@ -2008,7 +2002,7 @@ impl Win {
                                 s.clock_24h,
                                 Action::Clock24,
                             ),
-                            RowDef::Seg(
+                            RowDef::choice(
                                 prefs::tr("Battery percentage"),
                                 vec![
                                     (prefs::tr("Inside"), Action::BatteryPct(1)),
@@ -2026,7 +2020,7 @@ impl Win {
                     (Some(prefs::tr("Menu logo")), {
                         let custom = crate::menulogo::path().is_some();
                         let mut rows = vec![
-                            RowDef::Seg(
+                            RowDef::choice(
                                 prefs::tr("Menu logo"),
                                 vec![
                                     (prefs::tr("Ring"), Action::MenuLogoMode(0)),
@@ -2134,7 +2128,7 @@ impl Win {
                     ));
                 }
                 if s.icon_style == IconStyle::Tinted {
-                    theme.push(RowDef::Seg(
+                    theme.push(RowDef::choice(
                         prefs::tr("Tint color"),
                         vec![
                             (prefs::tr("Blue"), Action::IconTint(0)),
@@ -2159,7 +2153,7 @@ impl Win {
                 vec![
                     (
                         None,
-                        vec![RowDef::Seg(
+                        vec![RowDef::choice(
                             prefs::tr("Dock, floating panel, menu bar & Quick Panel scale"),
                             vec![
                                 ("100%", Action::UiScale(100)),
@@ -2197,12 +2191,12 @@ impl Win {
                     (
                         Some(prefs::tr("Glass")),
                         vec![
-                            RowDef::Seg(
+                            RowDef::choice(
                                 prefs::tr("Material"),
                                 mat_opts(true),
                                 mat_idx(s.dock_material),
                             ),
-                            RowDef::Seg(
+                            RowDef::choice(
                                 prefs::tr("floating panel material"),
                                 mat_opts(false),
                                 mat_idx(s.notch_material),
@@ -2219,6 +2213,18 @@ impl Win {
                 ]
             }
             5 => vec![
+                (Some(prefs::tr("Custom shortcuts")), {
+                    let mut rows = vec![
+                        self.shortcut_row("Overview", ShortcutCommand::Overview),
+                        RowDef::Toggle(
+                            prefs::tr("Switch app windows with Alt+`"),
+                            s.mac_shortcuts,
+                            Action::MacKeys,
+                        ),
+                    ];
+                    rows.extend(self.shortcut_help_row());
+                    rows
+                }),
                 (
                     None,
                     vec![
@@ -2252,7 +2258,7 @@ impl Win {
                 (
                     Some(prefs::tr("Window list")),
                     vec![
-                        RowDef::Seg(
+                        RowDef::choice(
                             prefs::tr("Window list position"),
                             vec![
                                 (prefs::tr("Left"), Action::StageRight(false)),
@@ -2260,7 +2266,7 @@ impl Win {
                             ],
                             if s.stage_right { 1 } else { 0 },
                         ),
-                        RowDef::Seg(
+                        RowDef::choice(
                             prefs::tr("Desktop icons"),
                             vec![
                                 (prefs::tr("Hidden"), Action::StageIcons(0)),
@@ -2280,10 +2286,16 @@ impl Win {
                 let names = ["Top left", "Top right", "Bottom left", "Bottom right"];
                 let mut rows = vec![RowDef::Corners(s.hot)];
                 rows.extend(names.iter().enumerate().map(|(i, name)| {
-                    RowDef::Pick(
+                    RowDef::choice(
                         prefs::tr(name),
-                        prefs::tr(hot_label(s.hot[i])).to_string(),
-                        Action::HotCycle(i),
+                        azr_core::settings::HotAction::ALL
+                            .into_iter()
+                            .map(|a| (prefs::tr(hot_label(a)), Action::HotAction(i, a)))
+                            .collect(),
+                        azr_core::settings::HotAction::ALL
+                            .iter()
+                            .position(|a| *a == s.hot[i])
+                            .unwrap_or(0),
                     )
                 }));
                 vec![(None, rows)]
@@ -2291,7 +2303,7 @@ impl Win {
             8 => vec![(
                 None,
                 vec![
-                    RowDef::Seg(
+                    RowDef::choice(
                         prefs::tr("Widget material"),
                         vec![
                             (prefs::tr("Original"), Action::WidgetStyle(0)),
@@ -2299,10 +2311,16 @@ impl Win {
                         ],
                         s.widget_style.min(1) as usize,
                     ),
-                    RowDef::Pick(
+                    RowDef::choice(
                         prefs::tr("Desktop widgets"),
-                        prefs::tr("Add widgets").to_string(),
-                        Action::WidgetGallery,
+                        std::iter::once((prefs::tr("Browse widgets"), Action::WidgetGallery))
+                            .chain(
+                                azr_core::widgets::Kind::ALL
+                                    .into_iter()
+                                    .map(|kind| (prefs::tr(kind.title()), Action::AddWidget(kind))),
+                            )
+                            .collect(),
+                        usize::MAX,
                     ),
                 ],
             )],
@@ -2907,6 +2925,62 @@ fn xy(lp: LPARAM) -> (f32, f32) {
     ((lp.0 as i16) as f32, ((lp.0 >> 16) as i16) as f32)
 }
 
+fn choose_setting(hwnd: HWND, name: &'static str) -> Option<Action> {
+    let (options, selected, mut anchor) = with_win(|win| {
+        let (options, selected) = win
+            .page(win.tab)
+            .into_iter()
+            .flat_map(|(_, rows)| rows)
+            .find_map(|row| match row {
+                RowDef::Choice(label, options, selected) if label == name => {
+                    Some((options, selected))
+                }
+                _ => None,
+            })?;
+        let control = win
+            .regions
+            .iter()
+            .find(|r| matches!(r.a, Action::ShowChoices(label) if label == name))?;
+        let anchor = windows::Win32::Foundation::POINT {
+            x: control.x.round() as i32,
+            y: (control.y + control.h - win.scroll)
+                .min((H - 4.0) * win.dpi)
+                .round() as i32,
+        };
+        Some((options, selected, anchor))
+    })
+    .flatten()?;
+    unsafe {
+        if !ClientToScreen(hwnd, &mut anchor).as_bool() {
+            return None;
+        }
+        let menu = CreatePopupMenu().ok()?;
+        for (index, (name, _)) in options.iter().enumerate() {
+            let label = windows_core::HSTRING::from(name.replace('&', "&&"));
+            let flags = if index == selected {
+                MF_STRING | MF_CHECKED
+            } else {
+                MF_STRING
+            };
+            let _ = AppendMenuW(menu, flags, index + 1, &label);
+        }
+        let selected_id = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+            anchor.x,
+            anchor.y,
+            Some(0),
+            hwnd,
+            None,
+        )
+        .0;
+        let _ = DestroyMenu(menu);
+        options
+            .get(selected_id.checked_sub(1)? as usize)
+            .map(|(_, action)| *action)
+    }
+}
+
 fn with_win<R>(f: impl FnOnce(&mut Win) -> R) -> Option<R> {
     WIN.with(|s| {
         s.try_borrow_mut()
@@ -3171,6 +3245,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     }
                 });
             }
+            let act = match act {
+                Some(Action::ShowChoices(label)) => choose_setting(hwnd, label),
+                other => other,
+            };
             match act {
                 Some(Action::CaptureShortcut(command)) => {
                     let _ = SetForegroundWindow(hwnd);
@@ -3237,6 +3315,18 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Action::WidgetStyle(v)) => prefs::update(|s| s.widget_style = v),
                 Some(Action::BatteryPct(v)) => prefs::update(|s| s.battery_pct = v),
                 Some(Action::WidgetGallery) => crate::widgets::open_gallery(),
+                Some(Action::AddWidget(kind)) => {
+                    if !crate::widgets::try_add(kind) {
+                        let message =
+                            windows_core::HSTRING::from(prefs::tr("No space to add this widget."));
+                        let _ = MessageBoxW(
+                            Some(hwnd),
+                            &message,
+                            w!("Azr"),
+                            MB_OK | MB_ICONINFORMATION,
+                        );
+                    }
+                }
                 Some(Action::NotchShape(b)) => prefs::update(|s| s.notch_island = b),
                 Some(Action::MenuLogoReset) => {
                     crate::menulogo::reset();
@@ -3322,6 +3412,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 Some(Action::MenuBarOn) => prefs::update(|s| s.menubar = !s.menubar),
                 Some(Action::HotCycle(i)) => prefs::update(|s| s.hot[i] = s.hot[i].next()),
+                Some(Action::HotAction(i, action)) => prefs::update(|s| s.hot[i] = action),
                 Some(Action::StageOn) => prefs::update(|s| s.stage = !s.stage),
                 Some(Action::SwitcherOn) => {
                     prefs::update(|s| s.overview_alt_tab = !s.overview_alt_tab)

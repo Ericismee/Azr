@@ -299,6 +299,9 @@ pub fn nearest_cell(
 }
 
 pub fn first_cell(taken: &[Rect], size: (i32, i32), grid: (i32, i32)) -> Option<(i32, i32)> {
+    if size.0 > grid.0 || size.1 > grid.1 {
+        return None;
+    }
     for c in 0..=(grid.0 - size.0).max(0) {
         for r in 0..=(grid.1 - size.1).max(0) {
             if !taken.iter().any(|t| cell_hit((c, r, size.0, size.1), *t)) {
@@ -409,6 +412,11 @@ pub fn ring(n: u32, thickness: f32, frac: f32, fg: [u8; 3], track: [u8; 4]) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn widget_picker_rejects_widgets_larger_than_the_available_grid() {
+        assert_eq!(first_cell(&[], (2, 1), (1, 2)), None);
+    }
 
     #[test]
     fn placed_round_trips_and_skips_junk() {

@@ -211,6 +211,7 @@ pub fn show() {
                 m.t0 = Instant::now();
                 m.step();
                 m.popup.show_active();
+                crate::topmost::request_raise();
                 match FramePump::start(m.popup.hwnd, m.t0, m.refresh_hz) {
                     Ok(frames) => m.frames = Some(frames),
                     Err(_) => unsafe {

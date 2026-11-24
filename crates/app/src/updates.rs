@@ -32,16 +32,24 @@ fn publish(status: Status) {
 pub fn schedule_check() {
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_secs(8));
-        if matches!(status(), Status::Idle) {
-            check();
-        }
+        check_if_idle();
     });
 }
 
 pub fn check() {
+    begin_check(false);
+}
+
+pub fn check_if_idle() {
+    begin_check(true);
+}
+
+fn begin_check(only_idle: bool) {
     {
         let mut status = STATUS.lock().unwrap();
-        if matches!(*status, Status::Checking | Status::Installing) {
+        if matches!(*status, Status::Checking | Status::Installing)
+            || (only_idle && !matches!(*status, Status::Idle))
+        {
             return;
         }
         *status = Status::Checking;

@@ -4,7 +4,7 @@
   #error PayloadDir must point to the binary-only staging folder.
 #endif
 
-#define AzrVersion "0.1.8"
+#define AzrVersion "0.1.9"
 #ifdef Windows10Preview
   #define AzrMinVersion "10.0.19045"
   #define AzrSetupName "Azr-Setup-Windows10-x64"

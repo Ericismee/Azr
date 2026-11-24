@@ -133,6 +133,11 @@ pub fn raise_all() {
     for (h, c) in v.iter().zip(&classes).rev() {
         if !BASE_LAYERS.contains(&c.as_str()) {
             raise(*h);
+            if c == "AzrMission" {
+                if let Some(i) = classes.iter().position(|class| class == "AzrDock") {
+                    raise(v[i]);
+                }
+            }
         }
     }
 }

@@ -358,6 +358,10 @@ pub fn open_gallery() {
     with(|m| m.open_gallery());
 }
 
+pub fn try_add(kind: Kind) -> bool {
+    with(|manager| manager.add(kind, None).is_some()).unwrap_or(false)
+}
+
 pub fn set_control_center_area(area: Option<RECT>) {
     with(|m| {
         m.control_center_area = area;
@@ -1601,17 +1605,13 @@ impl Mgr {
     }
 
     fn add(&mut self, kind: Kind, at: Option<(i32, i32)>) -> Option<usize> {
-        let d = self.dpi;
-        let (w, h) = widgets::size_of(kind, d);
-        let _ = (w, h, d);
         let pos = match at {
             Some(p) => p,
             None => {
                 let (_, _, grid) = self.grid();
                 let (cw, ch) = kind.cells();
                 let cell =
-                    widgets::first_cell(&self.cells_taken(None), (cw as i32, ch as i32), grid)
-                        .unwrap_or((0, 0));
+                    widgets::first_cell(&self.cells_taken(None), (cw as i32, ch as i32), grid)?;
                 self.cell_px(cell)
             }
         };

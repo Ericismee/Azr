@@ -82,8 +82,7 @@ pub fn activate(target: isize, dock: isize) -> bool {
         {
             return true;
         }
-        let _ = FlashWindow(hwnd, true);
-        false
+        force_foreground(target)
     }
 }
 

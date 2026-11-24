@@ -13,7 +13,7 @@ use azr_core::dock::layout::{hit, layout, Layout, Metrics, Slot};
 use azr_core::dock::reorder;
 use azr_core::visibility::policy::{should_hide, Inputs, Mode};
 use azr_platform::icons;
-use azr_platform::wins::{enumerate, focus, tracker};
+use azr_platform::wins::{enumerate, focus, overlap, tracker};
 use azr_platform::{launch, log, sys};
 use azr_ui::gfx::Gfx;
 use azr_ui::glass::{GlassPanel, GlassParams, Tier};
@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use tooltip::Tooltip;
 use view::{spring, Kind, View};
 use windows::core::w;
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -44,6 +44,7 @@ use windows_numerics::Vector3;
 pub const WM_ICONS: u32 = WM_APP + 3;
 pub const WM_APPBAR_SYNC: u32 = WM_APP + 4;
 const WM_DOCK_FOREGROUND: u32 = WM_APP + 98;
+const WM_DOCK_SWITCHING: u32 = WM_APP + 99;
 const STRIP_ENTER: u32 = WM_APP + 5;
 const STRIP_LEAVE: u32 = WM_APP + 6;
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -73,6 +74,7 @@ const WM_DPICHANGED: u32 = 0x02E0;
 
 static DOCK_HWND: AtomicIsize = AtomicIsize::new(0);
 static BUSY: AtomicBool = AtomicBool::new(false);
+static WINDOWS_REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
 
 const CMD_OPEN: usize = 1;
 const CMD_PIN: usize = 2;
@@ -207,6 +209,7 @@ pub struct Dock {
     shown: bool,
     starting: bool,
     revealing: bool,
+    switching: bool,
     fullscreen: bool,
     idle_timer: IdleTimer,
     smart_edge: Option<RevealZone>,
@@ -265,7 +268,15 @@ pub fn request_appbar_resync() {
 fn on_windows_changed() {
     let h = DOCK_HWND.load(Ordering::Relaxed);
     if h != 0 {
-        timer(HWND(h as *mut _), TIMER_WINDOWS, 120);
+        schedule_refresh(&WINDOWS_REFRESH_PENDING, || unsafe {
+            SetTimer(Some(HWND(h as *mut _)), TIMER_WINDOWS, 120, None) != 0
+        });
+    }
+}
+
+fn schedule_refresh(pending: &AtomicBool, arm: impl FnOnce() -> bool) {
+    if !pending.swap(true, Ordering::Relaxed) && !arm() {
+        pending.store(false, Ordering::Relaxed);
     }
 }
 
@@ -290,6 +301,20 @@ pub fn reveal_for(ms: u32) {
         d.update_visibility();
         timer(d.hwnd, TIMER_REVEAL, ms);
     });
+}
+
+pub fn set_switching(active: bool) {
+    let h = DOCK_HWND.load(Ordering::Relaxed);
+    if h != 0 {
+        unsafe {
+            let _ = PostMessageW(
+                Some(HWND(h as *mut _)),
+                WM_DOCK_SWITCHING,
+                WPARAM(active as usize),
+                LPARAM(0),
+            );
+        }
+    }
 }
 
 pub fn icon_rect_for(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
@@ -485,6 +510,7 @@ impl Dock {
                 shown: true,
                 starting: true,
                 revealing: false,
+                switching: false,
                 fullscreen: false,
                 idle_timer: IdleTimer::default(),
                 smart_edge: None,
@@ -754,7 +780,6 @@ impl Dock {
     }
 
     fn smart_should_hide(&mut self) -> bool {
-        let desktop = focus::is_desktop(crate::fullscreen::foreground_for_overlap());
         let hovered = self.cursor_over_dock();
         let busy = hovered
             || self.preview.as_ref().is_some_and(Preview::contains_cursor)
@@ -762,7 +787,9 @@ impl Dock {
             || self.press.is_some()
             || self.dragging.is_some()
             || self.grace
+            || self.switching
             || self.revealing;
+        let desktop = !busy && self.desktop_exposed();
         let delay = Duration::from_secs(u64::from(crate::prefs::get().dock_hide_delay));
         match self.idle_timer.update(Instant::now(), delay, busy, desktop) {
             IdleHide::Keep => {
@@ -782,6 +809,24 @@ impl Dock {
             }
             IdleHide::Hide => true,
         }
+    }
+
+    fn desktop_exposed(&self) -> bool {
+        let foreground = crate::fullscreen::foreground_for_overlap();
+        if focus::is_desktop(foreground) {
+            return true;
+        }
+        let display = RECT {
+            left: self.origin.0,
+            top: self.origin.1,
+            right: self.origin.0 + self.screen.0,
+            bottom: self.origin.1 + self.screen.1,
+        };
+        !self
+            .items
+            .iter()
+            .flat_map(|item| item.hwnds.iter().copied())
+            .any(|hwnd| overlap::visible_on_display(hwnd, display))
     }
 
     fn place_strip(&self) {
@@ -1767,8 +1812,10 @@ impl Dock {
                     .iter()
                     .copied()
                     .find(|&h| h == foreground || h == owning_window);
-                let target =
-                    visible.or_else(|| it.hwnds.iter().copied().find(|&h| focus::is_alive(h)));
+                let live = || it.hwnds.iter().copied().filter(|&h| focus::is_alive(h));
+                let target = visible
+                    .or_else(|| live().find(|&h| !focus::is_minimized(h)))
+                    .or_else(|| live().next());
 
                 if let Some(target) = target.filter(|_| !new_window) {
                     if !self.activate_target(target) && task_manager && visible.is_none() {
@@ -2363,7 +2410,10 @@ impl Dock {
         }
         kill(self.hwnd, id);
         match id {
-            TIMER_WINDOWS => self.refresh_windows(),
+            TIMER_WINDOWS => {
+                WINDOWS_REFRESH_PENDING.store(false, Ordering::Relaxed);
+                self.refresh_windows();
+            }
             TIMER_APPBAR => {
                 self.on_reconfigure();
                 if self.opts.appbar {
@@ -2562,6 +2612,13 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             with_dock(hwnd, |d| d.update_visibility());
             LRESULT(0)
         }
+        WM_DOCK_SWITCHING => {
+            with_dock(hwnd, |d| {
+                d.switching = wp.0 != 0;
+                d.update_visibility();
+            });
+            LRESULT(0)
+        }
         crate::prefs::WM_PREFS => {
             with_dock(hwnd, |d| {
                 d.apply_prefs();
@@ -2629,8 +2686,34 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_DESTROY => {
             azr_platform::shell::appbar::release();
             DOCK_HWND.store(0, Ordering::Relaxed);
+            WINDOWS_REFRESH_PENDING.store(false, Ordering::Relaxed);
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
+#[cfg(test)]
+mod refresh_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_window_events_do_not_postpone_a_scheduled_refresh() {
+        let pending = AtomicBool::new(false);
+        let mut calls = 0;
+        for _ in 0..50 {
+            schedule_refresh(&pending, || {
+                calls += 1;
+                true
+            });
+        }
+        assert_eq!(calls, 1);
+        pending.store(false, Ordering::Relaxed);
+        schedule_refresh(&pending, || false);
+        schedule_refresh(&pending, || {
+            calls += 1;
+            true
+        });
+        assert_eq!(calls, 2);
     }
 }

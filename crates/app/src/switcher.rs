@@ -19,6 +19,7 @@ static HOOK: AtomicIsize = AtomicIsize::new(0);
 static OVERVIEW_KEY: AtomicBool = AtomicBool::new(false);
 static CYCLE_KEY: AtomicBool = AtomicBool::new(false);
 static ALT_SWITCHING: AtomicBool = AtomicBool::new(false);
+static ALT_DOCK: AtomicBool = AtomicBool::new(false);
 static TAB_HELD: AtomicBool = AtomicBool::new(false);
 static CYCLE_HELD: AtomicBool = AtomicBool::new(false);
 
@@ -89,11 +90,22 @@ unsafe extern "system" fn key_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT
             let _ = PostMessageW(Some(target), WM_TASK_MANAGER, WPARAM(0), LPARAM(0));
         }
 
-        if !down
-            && [VK_MENU.0, VK_LMENU.0, VK_RMENU.0].contains(&vk)
-            && ALT_SWITCHING.swap(false, Ordering::Relaxed)
+        if !down && [VK_MENU.0, VK_LMENU.0, VK_RMENU.0].contains(&vk) {
+            if ALT_DOCK.swap(false, Ordering::Relaxed) {
+                crate::dock::set_switching(false);
+            }
+            if ALT_SWITCHING.swap(false, Ordering::Relaxed) {
+                let _ = PostMessageW(Some(target), WM_OVERVIEW_ACCEPT, WPARAM(0), LPARAM(0));
+            }
+        }
+        if down
+            && vk == VK_TAB.0
+            && alt
+            && !ctrl
+            && !crate::fullscreen::on_selected()
+            && !ALT_DOCK.swap(true, Ordering::Relaxed)
         {
-            let _ = PostMessageW(Some(target), WM_OVERVIEW_ACCEPT, WPARAM(0), LPARAM(0));
+            crate::dock::set_switching(true);
         }
 
         let binding = if vk == VK_TAB.0 {

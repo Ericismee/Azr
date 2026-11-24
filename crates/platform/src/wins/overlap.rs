@@ -54,6 +54,20 @@ fn frame_rect(h: HWND) -> Option<RECT> {
     Some(r)
 }
 
+fn intersects(a: RECT, b: RECT) -> bool {
+    a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+}
+
+pub fn visible_on_display(hwnd: isize, display: RECT) -> bool {
+    let hwnd = HWND(hwnd as *mut _);
+    unsafe {
+        IsWindowVisible(hwnd).as_bool()
+            && !IsIconic(hwnd).as_bool()
+            && !super::enumerate::cloaked(hwnd.0 as isize)
+            && frame_rect(hwnd).is_some_and(|frame| intersects(display, frame))
+    }
+}
+
 fn fullscreen_frame(frame: RECT, monitor: RECT, maximized: bool, style: u32) -> bool {
     const BORDER_TOLERANCE: i32 = 8;
     let captioned = style & WS_CAPTION.0 == WS_CAPTION.0;
@@ -125,10 +139,14 @@ pub fn evaluate(fg: isize, surface: HWND, area: (i32, i32, i32, i32)) -> Overlap
     let Some(window) = on_monitor(fg, monitor) else {
         return Overlap::default();
     };
-    let r = window.frame;
-    let hit = r.bottom > area.1 && r.top < area.3 && r.right > area.0 && r.left < area.2;
+    let bounds = RECT {
+        left: area.0,
+        top: area.1,
+        right: area.2,
+        bottom: area.3,
+    };
     Overlap {
-        overlapped: hit,
+        overlapped: intersects(window.frame, bounds),
         fullscreen: window.fullscreen,
     }
 }
@@ -144,6 +162,14 @@ mod tests {
             right,
             bottom,
         }
+    }
+
+    #[test]
+    fn a_window_on_an_adjacent_monitor_does_not_cover_the_dock_display() {
+        let display = rect(0, 0, 1920, 1080);
+        assert!(!intersects(display, rect(1920, -88, 3360, 812)));
+        assert!(intersects(display, rect(1880, -88, 3360, 812)));
+        assert!(!intersects(display, rect(-960, -720, 0, 0)));
     }
 
     #[test]
