@@ -1,9 +1,11 @@
+use crate::dock::menu::{Item, Menu, MENU_CLOSE, MENU_PICK};
 use crate::popup::Popup;
 use crate::prefs::{self, Role, WM_PREFS};
 use azr_core::hud::slider;
 use azr_core::i18n::Lang;
 use azr_core::settings::{Behavior, Material, Theme};
 use azr_core::shortcuts::{Chord, Command as ShortcutCommand};
+use azr_core::symbols::Sym;
 use azr_platform::icons::Bitmap;
 use azr_platform::text::{measure, render, render_face, Style, ICON_FACE};
 use azr_platform::{log, sys};
@@ -12,7 +14,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::ClientToScreen;
+use windows::Win32::Graphics::Gdi::{ClientToScreen, ScreenToClient};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
@@ -240,6 +242,7 @@ struct Region {
 
 enum RowDef {
     Toggle(&'static str, bool, Action),
+    Segments(&'static str, Vec<(&'static str, Action)>, usize),
     Choice(&'static str, Vec<(String, Action)>, usize),
     Slider(&'static str, u8, u8),
     Pick(&'static str, String, Action),
@@ -254,7 +257,11 @@ enum RowDef {
 }
 
 impl RowDef {
-    fn choice(label: &'static str, choices: Vec<(&'static str, Action)>, selected: usize) -> Self {
+    fn dropdown(
+        label: &'static str,
+        choices: Vec<(&'static str, Action)>,
+        selected: usize,
+    ) -> Self {
         Self::Choice(
             label,
             choices
@@ -292,6 +299,7 @@ fn row_label(r: &RowDef) -> &'static str {
         }
 
         RowDef::Toggle(l, ..)
+        | RowDef::Segments(l, ..)
         | RowDef::Choice(l, ..)
         | RowDef::Slider(l, ..)
         | RowDef::Info(l, ..)
@@ -342,7 +350,15 @@ fn user_name() -> String {
         .unwrap_or_else(|| "Azr".to_owned())
 }
 
+struct Dropdown {
+    label: &'static str,
+    actions: Vec<Action>,
+    selected: Option<usize>,
+}
+
 struct Win {
+    choice_menu: Option<Menu>,
+    dropdown: Option<Dropdown>,
     popup: Popup,
     gfx: Gfx,
     comp: Compositor,
@@ -473,6 +489,8 @@ fn create(comp: &Compositor) -> windows_core::Result<()> {
     let _ = popup.panel.set_tier(tier);
     let _ = popup.panel.set_radius(24.0 * dpi);
     let mut win = Box::new(Win {
+        choice_menu: None,
+        dropdown: None,
         popup,
         gfx,
         comp: comp.clone(),
@@ -545,6 +563,101 @@ fn col(rgb: [u8; 3], a: u8) -> Color {
 }
 
 impl Win {
+    fn close_choices(&mut self) {
+        if self.dropdown.take().is_some() {
+            if let Some(menu) = &self.choice_menu {
+                menu.hide();
+            }
+        }
+    }
+
+    fn show_choices(&mut self, label: &'static str) -> windows_core::Result<()> {
+        let already_open = self
+            .dropdown
+            .as_ref()
+            .is_some_and(|open| open.label == label);
+        self.close_choices();
+        if already_open {
+            return Ok(());
+        }
+
+        let Some((options, selected)) = self
+            .page(self.tab)
+            .into_iter()
+            .flat_map(|(_, rows)| rows)
+            .find_map(|row| match row {
+                RowDef::Choice(name, options, selected) if name == label => {
+                    Some((options, selected))
+                }
+                _ => None,
+            })
+        else {
+            return Ok(());
+        };
+        let Some(control) = self
+            .regions
+            .iter()
+            .find(|r| matches!(r.a, Action::ShowChoices(name) if name == label))
+        else {
+            return Ok(());
+        };
+        let hwnd = self.popup.hwnd;
+        let d = self.dpi;
+        let mut top = windows::Win32::Foundation::POINT {
+            x: control.x.round() as i32,
+            y: (control.y - self.scroll).max(VIEW_TOP * d).round() as i32,
+        };
+        let mut bottom = windows::Win32::Foundation::POINT {
+            x: top.x,
+            y: (control.y + control.h - self.scroll)
+                .min((H - 4.0) * d)
+                .round() as i32,
+        };
+        unsafe {
+            if !ClientToScreen(hwnd, &mut top).as_bool()
+                || !ClientToScreen(hwnd, &mut bottom).as_bool()
+            {
+                return Ok(());
+            }
+        }
+        let area = settings_work_area(hwnd);
+        let menu = match &mut self.choice_menu {
+            Some(menu) if menu.dpi() == d => menu,
+            slot => {
+                let c = sys::conditions();
+                let tier = if !c.transparency || c.battery_saver || c.remote_session {
+                    azr_ui::glass::Tier::Solid
+                } else {
+                    azr_ui::glass::Tier::Full
+                };
+                slot.insert(Menu::new(&self.comp, hwnd, d, (0, 0), tier)?)
+            }
+        };
+        menu.set_work_area(area);
+        let items = options
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| {
+                Item::action(i + 1, name, true).with_sym((i == selected).then_some(Sym::Check))
+            })
+            .collect();
+        let gap = (5.0 * d).round() as i32;
+        menu.show_dropdown(
+            &self.comp,
+            &self.gfx,
+            items,
+            top.x,
+            top.y - gap,
+            bottom.y + gap,
+        )?;
+        self.dropdown = Some(Dropdown {
+            label,
+            selected: (selected < options.len()).then_some(selected),
+            actions: options.into_iter().map(|(_, action)| action).collect(),
+        });
+        Ok(())
+    }
+
     fn surface(
         &mut self,
         s: &str,
@@ -965,6 +1078,14 @@ impl Win {
             RowDef::Corners(_) => 102.0,
             RowDef::ProjectLink(..) => 36.0,
             RowDef::Text(..) | RowDef::Pick(..) | RowDef::Info(..) => 30.0,
+            RowDef::Segments(_, opts, _) => {
+                let widths: Vec<f32> = opts
+                    .iter()
+                    .map(|(s, _)| (self.measured(s, 12.5, 600) + 26.0).max(72.0))
+                    .collect();
+                boxes = flow_controls(width, &widths, 30.0, 6.0);
+                boxes.last().map_or(30.0, |b| b.y + b.h)
+            }
             RowDef::Choice(..) => 34.0,
             RowDef::Thumbs(_, opts, _) => {
                 let cell = width / opts.len().max(1) as f32;
@@ -1109,6 +1230,34 @@ impl Win {
                         },
                     );
                     self.region(x0, y, cw, rh, *act);
+                }
+                RowDef::Segments(_, opts, selected) => {
+                    for (i, ((text, act), b)) in opts.iter().zip(boxes).enumerate() {
+                        let (bx, by, bw, bh) = (lx + b.x * d, cy + b.y * d, b.w * d, b.h * d);
+                        let on = i == *selected;
+                        self.rect(
+                            c,
+                            bx,
+                            by,
+                            bw,
+                            bh,
+                            10.0 * d,
+                            col(if on { accent } else { look.fg }, if on { 255 } else { 25 }),
+                        );
+                        self.text_fit(
+                            c,
+                            text,
+                            bx + bw / 2.0,
+                            by + 7.0 * d,
+                            bw - 20.0 * d,
+                            12.5,
+                            if on { 600 } else { 500 },
+                            if on { [255, 255, 255] } else { look.fg },
+                            1.0,
+                            1,
+                        );
+                        self.region(bx, by, bw, bh, *act);
+                    }
                 }
                 RowDef::Choice(label, opts, selected) => {
                     let value = opts.get(*selected).map_or_else(
@@ -1664,7 +1813,7 @@ impl Win {
             0 => vec![
                 (
                     None,
-                    vec![RowDef::choice(
+                    vec![RowDef::Segments(
                         prefs::tr("Language"),
                         vec![
                             ("Tiếng Việt", Action::Lang(Lang::Vi)),
@@ -1742,12 +1891,12 @@ impl Win {
                     None,
                     vec![
                         RowDef::Toggle(prefs::tr("Enable Dock"), s.dock_enabled, Action::DockOn),
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("When to show Dock"),
                             behaviors(true),
                             beh_idx(s.dock),
                         ),
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Dock hide delay (Smart mode)"),
                             vec![
                                 (prefs::tr("3 seconds"), Action::DockHideDelay(3)),
@@ -1760,7 +1909,7 @@ impl Win {
                                 _ => 0,
                             },
                         ),
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Minimize effect"),
                             vec![
                                 (prefs::tr("Funnel"), Action::MinEffect(0)),
@@ -1785,7 +1934,7 @@ impl Win {
                 (
                     Some(prefs::tr("Dock surface")),
                     vec![
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Surface style"),
                             vec![
                                 ("Liquid Glass", Action::DockSurface(0)),
@@ -1802,7 +1951,7 @@ impl Win {
                             s.refraction,
                             Action::Refraction,
                         ),
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Icon backplate"),
                             vec![
                                 (prefs::tr("Original"), Action::IconBackground(0)),
@@ -1833,7 +1982,7 @@ impl Win {
                     Some(prefs::tr("Launchpad")),
                     vec![
                         self.shortcut_row("Custom shortcut", ShortcutCommand::Launchpad),
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Launchpad shortcut"),
                             vec![
                                 ("Ctrl+Shift+Space", Action::LaunchpadKey(0)),
@@ -1846,7 +1995,7 @@ impl Win {
                                 s.launchpad_key as usize
                             },
                         ),
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Launchpad icon"),
                             vec![
                                 (prefs::tr("App grid"), Action::LaunchpadIcon(0)),
@@ -1878,7 +2027,7 @@ impl Win {
                             s.notch_enabled,
                             Action::NotchOn,
                         ),
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Shape"),
                             vec![
                                 (prefs::tr("Floating panel"), Action::NotchShape(false)),
@@ -1886,7 +2035,7 @@ impl Win {
                             ],
                             if s.notch_island { 1 } else { 0 },
                         ),
-                        RowDef::choice(prefs::tr("Behavior"), behaviors(false), beh_idx(s.notch)),
+                        RowDef::Segments(prefs::tr("Behavior"), behaviors(false), beh_idx(s.notch)),
                         RowDef::Slider(prefs::tr("Corner roundness"), s.notch_round, 3),
                         RowDef::Toggle(
                             prefs::tr("Open when the cursor is on the floating panel"),
@@ -1904,7 +2053,7 @@ impl Win {
                     let hour = azr_platform::time::local_now().hour;
                     let auto = azr_core::notch::glance::greeting_text("", &name, hour, s.lang);
                     vec![
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Show"),
                             vec![
                                 (prefs::tr("Greeting & info"), Action::NotchIdle(0)),
@@ -1987,7 +2136,7 @@ impl Win {
                                 s.menubar,
                                 Action::MenuBarOn,
                             ),
-                            RowDef::choice(
+                            RowDef::Segments(
                                 prefs::tr("menu bar background"),
                                 vec![
                                     (prefs::tr("Transparent"), Action::BarStyle(0)),
@@ -2002,7 +2151,7 @@ impl Win {
                                 s.clock_24h,
                                 Action::Clock24,
                             ),
-                            RowDef::choice(
+                            RowDef::Segments(
                                 prefs::tr("Battery percentage"),
                                 vec![
                                     (prefs::tr("Inside"), Action::BatteryPct(1)),
@@ -2020,7 +2169,7 @@ impl Win {
                     (Some(prefs::tr("Menu logo")), {
                         let custom = crate::menulogo::path().is_some();
                         let mut rows = vec![
-                            RowDef::choice(
+                            RowDef::Segments(
                                 prefs::tr("Menu logo"),
                                 vec![
                                     (prefs::tr("Ring"), Action::MenuLogoMode(0)),
@@ -2128,7 +2277,7 @@ impl Win {
                     ));
                 }
                 if s.icon_style == IconStyle::Tinted {
-                    theme.push(RowDef::choice(
+                    theme.push(RowDef::Segments(
                         prefs::tr("Tint color"),
                         vec![
                             (prefs::tr("Blue"), Action::IconTint(0)),
@@ -2153,7 +2302,7 @@ impl Win {
                 vec![
                     (
                         None,
-                        vec![RowDef::choice(
+                        vec![RowDef::Segments(
                             prefs::tr("Dock, floating panel, menu bar & Quick Panel scale"),
                             vec![
                                 ("100%", Action::UiScale(100)),
@@ -2191,12 +2340,12 @@ impl Win {
                     (
                         Some(prefs::tr("Glass")),
                         vec![
-                            RowDef::choice(
+                            RowDef::Segments(
                                 prefs::tr("Material"),
                                 mat_opts(true),
                                 mat_idx(s.dock_material),
                             ),
-                            RowDef::choice(
+                            RowDef::Segments(
                                 prefs::tr("floating panel material"),
                                 mat_opts(false),
                                 mat_idx(s.notch_material),
@@ -2258,7 +2407,7 @@ impl Win {
                 (
                     Some(prefs::tr("Window list")),
                     vec![
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Window list position"),
                             vec![
                                 (prefs::tr("Left"), Action::StageRight(false)),
@@ -2266,7 +2415,7 @@ impl Win {
                             ],
                             if s.stage_right { 1 } else { 0 },
                         ),
-                        RowDef::choice(
+                        RowDef::Segments(
                             prefs::tr("Desktop icons"),
                             vec![
                                 (prefs::tr("Hidden"), Action::StageIcons(0)),
@@ -2286,7 +2435,7 @@ impl Win {
                 let names = ["Top left", "Top right", "Bottom left", "Bottom right"];
                 let mut rows = vec![RowDef::Corners(s.hot)];
                 rows.extend(names.iter().enumerate().map(|(i, name)| {
-                    RowDef::choice(
+                    RowDef::dropdown(
                         prefs::tr(name),
                         azr_core::settings::HotAction::ALL
                             .into_iter()
@@ -2303,7 +2452,7 @@ impl Win {
             8 => vec![(
                 None,
                 vec![
-                    RowDef::choice(
+                    RowDef::Segments(
                         prefs::tr("Widget material"),
                         vec![
                             (prefs::tr("Original"), Action::WidgetStyle(0)),
@@ -2311,7 +2460,7 @@ impl Win {
                         ],
                         s.widget_style.min(1) as usize,
                     ),
-                    RowDef::choice(
+                    RowDef::dropdown(
                         prefs::tr("Desktop widgets"),
                         std::iter::once((prefs::tr("Browse widgets"), Action::WidgetGallery))
                             .chain(
@@ -2925,62 +3074,6 @@ fn xy(lp: LPARAM) -> (f32, f32) {
     ((lp.0 as i16) as f32, ((lp.0 >> 16) as i16) as f32)
 }
 
-fn choose_setting(hwnd: HWND, name: &'static str) -> Option<Action> {
-    let (options, selected, mut anchor) = with_win(|win| {
-        let (options, selected) = win
-            .page(win.tab)
-            .into_iter()
-            .flat_map(|(_, rows)| rows)
-            .find_map(|row| match row {
-                RowDef::Choice(label, options, selected) if label == name => {
-                    Some((options, selected))
-                }
-                _ => None,
-            })?;
-        let control = win
-            .regions
-            .iter()
-            .find(|r| matches!(r.a, Action::ShowChoices(label) if label == name))?;
-        let anchor = windows::Win32::Foundation::POINT {
-            x: control.x.round() as i32,
-            y: (control.y + control.h - win.scroll)
-                .min((H - 4.0) * win.dpi)
-                .round() as i32,
-        };
-        Some((options, selected, anchor))
-    })
-    .flatten()?;
-    unsafe {
-        if !ClientToScreen(hwnd, &mut anchor).as_bool() {
-            return None;
-        }
-        let menu = CreatePopupMenu().ok()?;
-        for (index, (name, _)) in options.iter().enumerate() {
-            let label = windows_core::HSTRING::from(name.replace('&', "&&"));
-            let flags = if index == selected {
-                MF_STRING | MF_CHECKED
-            } else {
-                MF_STRING
-            };
-            let _ = AppendMenuW(menu, flags, index + 1, &label);
-        }
-        let selected_id = TrackPopupMenu(
-            menu,
-            TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
-            anchor.x,
-            anchor.y,
-            Some(0),
-            hwnd,
-            None,
-        )
-        .0;
-        let _ = DestroyMenu(menu);
-        options
-            .get(selected_id.checked_sub(1)? as usize)
-            .map(|(_, action)| *action)
-    }
-}
-
 fn with_win<R>(f: impl FnOnce(&mut Win) -> R) -> Option<R> {
     WIN.with(|s| {
         s.try_borrow_mut()
@@ -3002,9 +3095,35 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             .unwrap_or(false);
             LRESULT(if drag { HTCAPTION } else { HTCLIENT } as isize)
         }
+        MENU_CLOSE => {
+            let (x, y) = xy(lp);
+            let mut pt = windows::Win32::Foundation::POINT {
+                x: x as i32,
+                y: y as i32,
+            };
+            let _ = ScreenToClient(hwnd, &mut pt);
+            with_win(|w| {
+                let same_trigger = w.dropdown.as_ref().is_some_and(|open| {
+                    matches!(w.hit(pt.x as f32, pt.y as f32), Some(Action::ShowChoices(label)) if label == open.label)
+                });
+                if !same_trigger {
+                    w.close_choices();
+                }
+            });
+            LRESULT(0)
+        }
+        WM_ACTIVATE if wp.0 as u16 == WA_INACTIVE as u16 => {
+            with_win(Win::close_choices);
+            DefWindowProcW(hwnd, msg, wp, lp)
+        }
+        WM_MOVE | WM_DISPLAYCHANGE | WM_DPICHANGED => {
+            with_win(Win::close_choices);
+            DefWindowProcW(hwnd, msg, wp, lp)
+        }
         WM_MOUSEWHEEL => {
             let delta = ((wp.0 >> 16) as i16) as f32;
             with_win(|w| {
+                w.close_choices();
                 let d = w.dpi;
                 let (screen_x, _) = xy(lp);
                 if screen_x - (w.popup.rect.0 as f32) < SIDEBAR_W * d {
@@ -3144,6 +3263,30 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_KEYDOWN => {
             let vk = wp.0 as u16;
             with_win(|w| {
+                if let (Some(open), Some(menu)) = (&w.dropdown, &w.choice_menu) {
+                    match vk {
+                        0x1B => w.close_choices(),
+                        0x26 | 0x28 => {
+                            let count = open.actions.len();
+                            let index = menu.highlighted_row().or(open.selected);
+                            let next = match (vk, index) {
+                                (0x26, Some(i)) => (i + count - 1) % count,
+                                (0x28, Some(i)) => (i + 1) % count,
+                                (0x26, None) => count - 1,
+                                _ => 0,
+                            };
+                            menu.highlight_row(next);
+                        }
+                        0x0D => {
+                            if let Some(i) = menu.highlighted_row().or(open.selected) {
+                                let _ =
+                                    PostMessageW(Some(hwnd), MENU_PICK, WPARAM(i + 1), LPARAM(0));
+                            }
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
                 if w.edit.is_some() {
                     match vk {
                         0x08 => {
@@ -3198,26 +3341,38 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             });
             LRESULT(0)
         }
-        WM_LBUTTONUP => {
-            let (x, y) = xy(lp);
-            let _ = ReleaseCapture();
-            if with_win(|w| w.side_drag.take().is_some()).unwrap_or(false) {
-                with_win(|w| w.render());
-                return LRESULT(0);
-            }
-            let act = with_win(|w| {
-                let was_pressed = w.press.take().is_some();
-                if let Some((id, sx, sw)) = w.dragging.take() {
-                    w.slide(id, x, sx, sw, true);
-                    w.render();
-                    return None;
+        WM_LBUTTONUP | MENU_PICK => {
+            let act = if msg == MENU_PICK {
+                with_win(|w| {
+                    let action = w
+                        .dropdown
+                        .as_ref()
+                        .and_then(|open| open.actions.get(wp.0.checked_sub(1)?).copied());
+                    w.close_choices();
+                    action
+                })
+                .flatten()
+            } else {
+                let (x, y) = xy(lp);
+                let _ = ReleaseCapture();
+                if with_win(|w| w.side_drag.take().is_some()).unwrap_or(false) {
+                    with_win(|w| w.render());
+                    return LRESULT(0);
                 }
-                if was_pressed {
-                    w.render();
-                }
-                w.hit(x, y)
-            })
-            .flatten();
+                with_win(|w| {
+                    let was_pressed = w.press.take().is_some();
+                    if let Some((id, sx, sw)) = w.dragging.take() {
+                        w.slide(id, x, sx, sw, true);
+                        w.render();
+                        return None;
+                    }
+                    if was_pressed {
+                        w.render();
+                    }
+                    w.hit(x, y)
+                })
+                .flatten()
+            };
             if !matches!(
                 act,
                 Some(Action::Search | Action::ClearSearch | Action::Tab(_))
@@ -3245,11 +3400,14 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     }
                 });
             }
-            let act = match act {
-                Some(Action::ShowChoices(label)) => choose_setting(hwnd, label),
-                other => other,
-            };
             match act {
+                Some(Action::ShowChoices(label)) => {
+                    with_win(|w| {
+                        if let Err(err) = w.show_choices(label) {
+                            log::line("settings", &format!("Could not open dropdown: {err}"));
+                        }
+                    });
+                }
                 Some(Action::CaptureShortcut(command)) => {
                     let _ = SetForegroundWindow(hwnd);
                     let _ = SetFocus(Some(hwnd));
@@ -3493,7 +3651,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             LRESULT(0)
         }
         WM_PREFS => {
-            with_win(|w| w.render());
+            with_win(|w| {
+                w.close_choices();
+                w.render();
+            });
             let (themed, _) = (prefs::look(Role::Themed), ());
             with_win(|w| {
                 let base = azr_ui::glass::GlassParams::dark((10.0, 10.0), 24.0 * w.dpi);

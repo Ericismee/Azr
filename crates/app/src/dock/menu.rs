@@ -395,7 +395,7 @@ impl Menu {
         top: i32,
         right_aligned: bool,
     ) -> Result<()> {
-        self.show_impl(comp, gfx, items, x, top, false, right_aligned)
+        self.show_impl(comp, gfx, items, x, top, false, right_aligned, None)
     }
 
     pub fn hide_animated(&mut self, comp: &Compositor) {
@@ -442,7 +442,7 @@ impl Menu {
         x: i32,
         y: i32,
     ) -> Result<()> {
-        self.show_impl(comp, gfx, items, x, y, true, false)
+        self.show_impl(comp, gfx, items, x, y, true, false, None)
     }
 
     pub fn show_below(
@@ -453,7 +453,48 @@ impl Menu {
         x: i32,
         top: i32,
     ) -> Result<()> {
-        self.show_impl(comp, gfx, items, x, top, false, false)
+        self.show_impl(comp, gfx, items, x, top, false, false, None)
+    }
+
+    pub fn dpi(&self) -> f32 {
+        self.dpi
+    }
+
+    pub fn show_dropdown(
+        &mut self,
+        comp: &Compositor,
+        gfx: &Gfx,
+        items: Vec<Item>,
+        x: i32,
+        above_edge: i32,
+        below_edge: i32,
+    ) -> Result<()> {
+        self.show_impl(
+            comp,
+            gfx,
+            items,
+            x,
+            below_edge,
+            false,
+            false,
+            Some(above_edge),
+        )
+    }
+
+    pub fn highlighted_row(&self) -> Option<usize> {
+        let key = self.popup.hwnd.0 as isize;
+        LIVE.with(|rows| rows.borrow().get(&key).and_then(|live| live.hover))
+    }
+
+    pub fn highlight_row(&self, index: usize) {
+        let key = self.popup.hwnd.0 as isize;
+        LIVE.with(|rows| {
+            if let Some(live) = rows.borrow_mut().get_mut(&key) {
+                if index < live.rows.len() {
+                    set_hover(live, Some(index));
+                }
+            }
+        });
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -466,6 +507,7 @@ impl Menu {
         y: i32,
         above: bool,
         right_aligned: bool,
+        above_edge: Option<i32>,
     ) -> Result<()> {
         let key = self.popup.hwnd.0 as isize;
         let d = self.dpi;
@@ -731,6 +773,10 @@ impl Menu {
             }
         }
         let (wi, hi) = (w.ceil() as i32, h.ceil() as i32);
+        let (above, y) = match above_edge {
+            Some(edge) if y + hi + 4 > self.origin.1 + self.screen.1 => (true, edge),
+            _ => (above, y),
+        };
         let anchor = x;
         let x = if right_aligned { x - wi } else { x };
         let px = self.origin.0 + (x - self.origin.0).clamp(4, (self.screen.0 - wi - 4).max(4));
