@@ -1,3 +1,22 @@
+# Kiểm thử Azr 0.1.9 trên Windows 11
+
+## Đã xác nhận
+
+- **Bản phát hành:** Build release, 284 bài kiểm thử đạt và 2 bài được bỏ qua. Hai bộ cài trên GitHub khớp SHA-256 với bản đóng gói. Máy kiểm thử chạy Windows 11 build 26300 với ba màn hình ở 96, 144 và 192 DPI.
+- **Nâng cấp:** Azr 0.1.8 phát hiện bản 0.1.9 và hiển thị dấu báo cùng nút cài. Trình cập nhật tải đúng bộ cài Windows 11 từ GitHub, cài đặt và mở lại Azr. Năm tệp cài đặt và bố cục giữ nguyên SHA-256. Bản 0.1.9 sau đó báo đã là phiên bản mới nhất.
+- **Cài đặt:** Mở đủ 10 trang. Chọn tiếng Việt từ danh sách xổ xuống, mở lại ứng dụng và kiểm tra dữ liệu đã lưu. Thêm đồng hồ từ danh sách widget và xác nhận bố cục được lưu. Trang Giao diện nằm trong màn hình ở cả hai ngôn ngữ với tỷ lệ UI 100%, 125% và 150%.
+- **Dock và quản lý cửa sổ:** Đã kiểm tra Dock hiện khi giữ Alt+Tab quá thời gian tự ẩn và Tổng quan đóng khi thả Alt trên bản phát hành. Các sửa đổi theo màn hình, quay về desktop và chuyển Codex sang Brave từ Dock đã được kiểm tra trên bản trước phát hành.
+- **Tìm kiếm nhanh, Launchpad và Bảng điều khiển:** Mỗi giao diện được mở và đóng sáu lượt. Thời gian từ yêu cầu mở đến khi thấy cửa sổ lần đầu lần lượt là 44,7 ms, 40,2 ms và 62,2 ms. Đã kiểm tra hình học của Bảng điều khiển và thư viện, cùng việc ẩn và khôi phục widget khi giao diện chồng lên nhau.
+- **Dynamic Island và nguồn:** Đã mở rộng Dynamic Island với nguồn media mô phỏng. Đã mở rồi hủy hộp thoại xác nhận khởi động lại và tắt máy.
+
+## Phạm vi rà soát và ưu tiên tiếp theo
+
+- **Dock, Tổng quan và Stage Manager:** Đo thời gian từ click đến khi cửa sổ nhận focus, thử ứng dụng có nhiều cửa sổ, preview, kéo thả, game fullscreen và ngắt kết nối màn hình khi đang chạy.
+- **Settings, widget và hiệu ứng kính:** Tái hiện lỗi chữ ở [issue #2](https://github.com/Ericismee/Azr/issues/2) với DPI Windows thực 125–200%, tiếng Anh và tiếng Việt, nền sáng/tối, cùng các chế độ kính khác nhau.
+- **Tìm kiếm, Launchpad và phím tắt:** Thử chỉ mục nhiều ứng dụng và tệp, phân trang, xung đột phím tắt, menu ứng dụng và thao tác ở góc màn hình.
+- **Dynamic Island, menu và thiết bị:** Thử trình phát thật, File Shelf, hẹn giờ, thông báo, Wi-Fi, Bluetooth, âm thanh và độ sáng trên các thiết bị hỗ trợ. Phân biệt kiểm tra hộp thoại và thực thi thao tác nguồn.
+- **Windows và trình cập nhật:** Thử trên Windows 10 22H2 thật, mất mạng, hủy cài, khởi động lại Explorer và sleep/wake. Hiện chưa có phép đo FPS, GPU hoặc bộ nhớ dài hạn cho bản này.
+
 # Kiểm thử Azr 0.1.6 trên Windows 11
 
 Ngày 24/11/2026. Bản kiểm thử dùng hồ sơ Azr tạm, tài khoản Windows có mức toàn vẹn **Medium** trên máy chính, và Windows Sandbox tắt mạng để thử trình cài đặt và khởi động lại Explorer.
