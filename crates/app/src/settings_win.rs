@@ -227,7 +227,6 @@ enum Action {
     NotchShape(bool),
     WidgetStyle(u8),
     WidgetGallery,
-    AddWidget(azr_core::widgets::Kind),
     BatteryPct(u8),
 }
 
@@ -1260,16 +1259,9 @@ impl Win {
                     }
                 }
                 RowDef::Choice(label, opts, selected) => {
-                    let value = opts.get(*selected).map_or_else(
-                        || {
-                            prefs::tr(if *label == prefs::tr("Desktop widgets") {
-                                "Add widgets"
-                            } else {
-                                "Custom"
-                            })
-                        },
-                        |(name, _)| name.as_str(),
-                    );
+                    let value = opts
+                        .get(*selected)
+                        .map_or_else(|| prefs::tr("Custom"), |(name, _)| name.as_str());
                     self.rect(c, lx, cy, inner * d, 34.0 * d, 8.0 * d, col(look.fg, 30));
                     self.text_fit(
                         c,
@@ -2460,16 +2452,10 @@ impl Win {
                         ],
                         s.widget_style.min(1) as usize,
                     ),
-                    RowDef::dropdown(
+                    RowDef::Pick(
                         prefs::tr("Desktop widgets"),
-                        std::iter::once((prefs::tr("Browse widgets"), Action::WidgetGallery))
-                            .chain(
-                                azr_core::widgets::Kind::ALL
-                                    .into_iter()
-                                    .map(|kind| (prefs::tr(kind.title()), Action::AddWidget(kind))),
-                            )
-                            .collect(),
-                        usize::MAX,
+                        prefs::tr("Add widgets").to_string(),
+                        Action::WidgetGallery,
                     ),
                 ],
             )],
@@ -3473,18 +3459,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Action::WidgetStyle(v)) => prefs::update(|s| s.widget_style = v),
                 Some(Action::BatteryPct(v)) => prefs::update(|s| s.battery_pct = v),
                 Some(Action::WidgetGallery) => crate::widgets::open_gallery(),
-                Some(Action::AddWidget(kind)) => {
-                    if !crate::widgets::try_add(kind) {
-                        let message =
-                            windows_core::HSTRING::from(prefs::tr("No space to add this widget."));
-                        let _ = MessageBoxW(
-                            Some(hwnd),
-                            &message,
-                            w!("Azr"),
-                            MB_OK | MB_ICONINFORMATION,
-                        );
-                    }
-                }
                 Some(Action::NotchShape(b)) => prefs::update(|s| s.notch_island = b),
                 Some(Action::MenuLogoReset) => {
                     crate::menulogo::reset();

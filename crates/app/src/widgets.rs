@@ -358,10 +358,6 @@ pub fn open_gallery() {
     with(|m| m.open_gallery());
 }
 
-pub fn try_add(kind: Kind) -> bool {
-    with(|manager| manager.add(kind, None).is_some()).unwrap_or(false)
-}
-
 pub fn set_control_center_area(area: Option<RECT>) {
     with(|m| {
         m.control_center_area = area;

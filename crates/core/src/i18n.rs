@@ -295,8 +295,6 @@ const VI: &[(&str, &str)] = &[
     ("Widget material", "Chất liệu tiện ích"),
     ("Original", "Nguyên bản"),
     ("Desktop widgets", "Tiện ích màn hình nền"),
-    ("Browse widgets", "Mở thư viện tiện ích"),
-    ("No space to add this widget.", "Không còn chỗ để thêm tiện ích này."),
     ("Custom shortcut", "Phím tắt tùy chỉnh"),
     ("Add widgets", "Thêm tiện ích"),
     ("Edit Widgets…", "Sửa tiện ích…"),
