@@ -52,14 +52,13 @@ Trong ảnh Task Manager này, Azr hiển thị **6,6 MB** bộ nhớ và **0,1%
 
 ## Tải và sử dụng
 
-Yêu cầu **Windows 11 x64 (Intel/AMD)**. Hai gói đều có sẵn thư viện Visual C++ cần thiết, font và logo; không cần cài Rust, Visual Studio, .NET hay Visual C++ Redistributable riêng.
+Chọn bộ cài theo phiên bản Windows đang dùng. Các liên kết luôn trỏ đến [bản chính thức mới nhất](https://github.com/Ericismee/Azr/releases/latest).
 
-Các gói dưới đây là **Azr 0.1.6 Beta**. Có thể tải bản ổn định tại [trang phát hành mới nhất](https://github.com/Ericismee/Azr/releases/latest).
+- **[Bộ cài Windows 11 x64](https://github.com/Ericismee/Azr/releases/latest/download/Azr-Setup-Windows11-x64.exe)** dành cho người dùng Windows 11.
+- **[Bộ cài Windows 10 22H2 x64](https://github.com/Ericismee/Azr/releases/latest/download/Azr-Setup-Windows10-x64.exe)** là bản thử tương thích cho build 19045. Vẫn cần kiểm thử trên Windows 10 thật.
+- **[Bản portable x64](https://github.com/Ericismee/Azr/releases/latest/download/Azr-Windows-x64-Portable.zip)** gồm hai EXE, DLL, font và logo. Giải nén toàn bộ ZIP rồi mở `azr.exe`.
 
-- **[Bản cài đặt EXE](https://github.com/Ericismee/Azr/releases/download/v0.1.6/Azr-Setup-0.1.6-x64.exe):** Chạy trình cài, sau đó mở Azr từ Start Menu. Ứng dụng được cài cho tài khoản hiện tại tại `%LOCALAPPDATA%\Programs\Azr`.
-- **[Bản portable đầy đủ](https://github.com/Ericismee/Azr/releases/download/v0.1.6/Azr-0.1.6-windows-x64-portable-complete.zip):** Giải nén toàn bộ ZIP rồi mở `azr.exe`. Giữ nguyên hai EXE, các DLL, thư mục `fonts` và `brand` đi kèm.
-
-Các gói chạy không chứa mã nguồn hay tệp debug. Thành phần hệ thống và driver đồ họa của Windows vẫn cần hoạt động bình thường. Windows 10, máy 32-bit và ARM chưa được xác nhận hỗ trợ. EXE chưa được ký số. Dùng `SHA256SUMS.txt` đi kèm bản phát hành bạn tải để đối chiếu tệp. Xem [hướng dẫn tự build](docs/BUILD.md).
+Hai bộ cài có sẵn các DLL Visual C++ cần thiết và cài cho tài khoản hiện tại tại `%LOCALAPPDATA%\Programs\Azr`. Các gói dành cho máy Intel hoặc AMD x64. EXE chưa được ký số. Dùng [`SHA256SUMS.txt`](https://github.com/Ericismee/Azr/releases/latest/download/SHA256SUMS.txt) để đối chiếu tệp tải về. Xem [hướng dẫn tự build](docs/BUILD.md).
 
 ## Cấu hình và quyền riêng tư
 

@@ -51,14 +51,13 @@ In this Task Manager snapshot, Azr shows **6.6 MB** of memory and **0.1% CPU**, 
 
 ## Download and run
 
-Requires **Windows 11 x64 (Intel/AMD)**. Both packages include the required Visual C++ runtime DLLs, fonts, and logo. You do not need Rust, Visual Studio, .NET, or a separate Visual C++ Redistributable installation.
+Use the installer for your edition of Windows. These links follow the [latest stable release](https://github.com/Ericismee/Azr/releases/latest).
 
-The downloads below are for **Azr 0.1.6 Beta**. See the [latest stable release](https://github.com/Ericismee/Azr/releases/latest) for the stable packages.
+- **[Windows 11 x64 installer](https://github.com/Ericismee/Azr/releases/latest/download/Azr-Setup-Windows11-x64.exe)** is the recommended download for Windows 11.
+- **[Windows 10 22H2 x64 installer](https://github.com/Ericismee/Azr/releases/latest/download/Azr-Setup-Windows10-x64.exe)** is a compatibility preview for build 19045. Testing on Windows 10 itself is still pending.
+- **[Portable ZIP for x64](https://github.com/Ericismee/Azr/releases/latest/download/Azr-Windows-x64-Portable.zip)** contains both executables, DLLs, fonts, and branding. Extract the whole archive before opening `azr.exe`.
 
-- **[EXE installer](https://github.com/Ericismee/Azr/releases/download/v0.1.6/Azr-Setup-0.1.6-x64.exe):** Run Setup, then open Azr from the Start Menu. It installs for the current user in `%LOCALAPPDATA%\Programs\Azr`.
-- **[Complete portable package](https://github.com/Ericismee/Azr/releases/download/v0.1.6/Azr-0.1.6-windows-x64-portable-complete.zip):** Extract the entire ZIP and open `azr.exe`. Keep both EXEs, the DLLs, `fonts`, and `brand` together.
-
-Runtime packages contain no source code or debug files. Windows system components and graphics drivers must still function normally. Windows 10, 32-bit systems, and ARM support have not been verified. The executables are unsigned. Use `SHA256SUMS.txt` from the release you download to verify them. To build from source, see the [build guide](docs/BUILD.md).
+The installers include the required Visual C++ DLLs and install for the current user in `%LOCALAPPDATA%\Programs\Azr`. All packages target x64 Intel and AMD systems. The executables are unsigned. Use [`SHA256SUMS.txt`](https://github.com/Ericismee/Azr/releases/latest/download/SHA256SUMS.txt) to verify your download. See the [build guide](docs/BUILD.md) for source builds.
 
 ## Configuration and privacy
 

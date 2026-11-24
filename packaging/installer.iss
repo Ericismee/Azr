@@ -1,6 +1,16 @@
 ; Compile with ISCC /DPayloadDir=... /DOutputPath=... installer.iss
+; Add /DWindows10Preview for the Windows 10 22H2 compatibility preview.
 #ifndef PayloadDir
   #error PayloadDir must point to the binary-only staging folder.
+#endif
+
+#define AzrVersion "0.1.7"
+#ifdef Windows10Preview
+  #define AzrMinVersion "10.0.19045"
+  #define AzrSetupName "Azr-Setup-Windows10-x64"
+#else
+  #define AzrMinVersion "10.0.22000"
+  #define AzrSetupName "Azr-Setup-Windows11-x64"
 #endif
 #ifndef OutputPath
   #error OutputPath must point to the installer output folder.
@@ -9,7 +19,10 @@
 [Setup]
 AppId={{B35F3A75-BE5C-4A91-9962-EAC9CC889BC3}
 AppName=Azr
-AppVersion=0.1.6
+AppVersion={#AzrVersion}
+#ifdef Windows10Preview
+AppVerName=Azr {#AzrVersion} (Windows 10 Compatibility Preview)
+#endif
 AppPublisher=Ericismee
 AppPublisherURL=https://github.com/Ericismee/Azr
 DefaultDirName={localappdata}\Programs\Azr
@@ -18,9 +31,9 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0.22000
+MinVersion={#AzrMinVersion}
 OutputDir={#OutputPath}
-OutputBaseFilename=Azr-Setup-0.1.6-x64
+OutputBaseFilename={#AzrSetupName}
 SetupIconFile=..\assets\azr.ico
 UninstallDisplayIcon={app}\azr.exe
 VersionInfoProductName=Azr

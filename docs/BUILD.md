@@ -24,3 +24,18 @@ The installer recipe is in [packaging/installer.iss](../packaging/installer.iss)
 The runtime payload contains `azr.exe`, `azr-guard.exe`, the required Visual C++ runtime DLLs, bundled fonts, the brand image, and license files. Exclude source files, debug symbols, and development tools. Test installation, application startup, and uninstallation in Windows Sandbox before publishing.
 
 Tiếng Việt: Công thức đóng gói nằm trong `packaging/installer.iss` và được biên dịch riêng bằng Inno Setup. Gói chạy cần đủ EXE, DLL, font, logo và giấy phép; không kèm mã nguồn hoặc tệp debug. Kiểm tra cài, chạy và gỡ trong Windows Sandbox trước khi phát hành.
+
+## Windows 10 compatibility preview
+
+Add `/DWindows10Preview` to the installer build to target Windows 10 22H2 x64 (build 19045). The preview uses the same Azr and guard executables, app ID, install location, and preferences as the standard package. It can update an existing Azr installation. The default installer targets Windows 11 build 22000 or later.
+
+```powershell
+ISCC.exe "/DPayloadDir=C:\build\Azr" "/DOutputPath=C:\build\output" packaging\installer.iss
+ISCC.exe /DWindows10Preview "/DPayloadDir=C:\build\Azr" "/DOutputPath=C:\build\output" packaging\installer.iss
+```
+
+The output files are `Azr-Setup-Windows11-x64.exe` and `Azr-Setup-Windows10-x64.exe`. Keep these filenames on future GitHub releases so the version-independent download links in both READMEs continue to work.
+
+Azr's glass panels can fall back to a color brush when Windows cannot create the blur effect. Window capture can show the system capture border where borderless capture is unavailable. Verify the preview on a Windows 10 22H2 system before listing Windows 10 as a supported operating system. A Windows 11 Sandbox verifies packaging and Windows 11 regression behavior.
+
+**Tiếng Việt.** Thêm `/DWindows10Preview` để tạo bộ cài thử cho Windows 10 22H2 x64, build 19045. Bộ cài thử dùng chung ứng dụng và cấu hình với bản chính, nên có thể cập nhật bản Azr đã cài. Hiệu ứng kính có thể chuyển sang nền màu khi Windows không tạo được hiệu ứng mờ. Cần chạy thử trên Windows 10 22H2 trước khi công bố hỗ trợ chính thức.
