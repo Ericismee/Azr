@@ -1,5 +1,5 @@
 <div align="center">
-<img src="./assets/brand/azr-liquid-glass.png" width="144" alt="Azr Logo">
+<img src="docs/assets/azr-liquid-glass-banner.jpg" alt="Azr Liquid Glass desktop customization for Windows 10 and 11">
 <h1>Azr</h1>
 <p>Desktop customization for Windows 11.</p>
 
@@ -17,10 +17,6 @@ Azr is a desktop customization app for **Windows 11**, inspired by macOS. It add
 
 **[Download the latest release](https://github.com/Ericismee/Azr/releases/latest)** · [Share your desktop](https://github.com/Ericismee/Azr/discussions/3) · [Screenshots](#screenshots) · [Tiếng Việt](README.vi.md)
 
-[![Azr desktop on Windows 11 with a glass Dock, Dynamic Island, and widgets](docs/assets/azr-desktop-showcase.png)](https://github.com/Ericismee/Azr/discussions/3)
-
-*What does Azr look like on your desktop? [Share your setup](https://github.com/Ericismee/Azr/discussions/3).*
-
 ## Main features
 
 - **Dock and Launchpad:** Access frequently used apps, browse your applications, and open Downloads or Recycle Bin. Customize icon appearance and enable magnification on hover.
@@ -31,6 +27,10 @@ Azr is a desktop customization app for **Windows 11**, inspired by macOS. It add
 - **Appearance customization:** Choose light or dark themes, glass surfaces, transparency, colors, and icon styles. Adjust the Dock, icon corners, and menu logo using a built-in symbol or your own image.
 
 ## Screenshots
+
+[![Azr desktop with a blue wallpaper, glass Dock, Dynamic Island, and widgets](docs/assets/azr-desktop-blue.png)](docs/assets/azr-desktop-blue.png)
+
+*What does Azr look like on your desktop? [Share your setup](https://github.com/Ericismee/Azr/discussions/3).*
 
 <details>
 <summary>Explore the desktop, glass controls, and widgets</summary>

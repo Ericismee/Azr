@@ -1,5 +1,5 @@
 <div align="center">
-<img src="./assets/brand/azr-liquid-glass.png" width="144" alt="Azr Logo">
+<img src="docs/assets/azr-liquid-glass-banner.jpg" alt="Giao diện Liquid Glass của Azr cho Windows 10 và 11">
 <h1>Azr</h1>
 <p>Tùy biến giao diện Windows 11.</p>
 
@@ -17,10 +17,6 @@ Azr là ứng dụng tùy biến giao diện dành cho **Windows 11**, lấy c�
 
 **[Tải bản mới nhất](https://github.com/Ericismee/Azr/releases/latest)** · [Ảnh giao diện](#ảnh-giao-diện) · [English](README.md) · [Khoe desktop của bạn](https://github.com/Ericismee/Azr/discussions/3)
 
-[![Desktop Azr trên Windows 11 với Dock kính, Dynamic Island và widget](docs/assets/azr-desktop-showcase.png)](https://github.com/Ericismee/Azr/discussions/3)
-
-*Bạn tùy biến Azr thế nào? [Chia sẻ ảnh desktop của bạn](https://github.com/Ericismee/Azr/discussions/3).*
-
 ## Tính năng chính
 
 - **Dock và Launchpad:** Truy cập ứng dụng thường dùng, xem danh sách ứng dụng, mở thư mục Tải xuống và Thùng rác. Dock hỗ trợ phóng to khi rê chuột và tùy chỉnh cách hiển thị biểu tượng.
@@ -31,6 +27,10 @@ Azr là ứng dụng tùy biến giao diện dành cho **Windows 11**, lấy c�
 - **Tùy chỉnh giao diện:** Chọn chủ đề sáng hoặc tối, chất liệu kính, độ trong suốt, màu sắc và kiểu biểu tượng. Điều chỉnh hình dáng Dock, góc bo biểu tượng và logo trên thanh menu bằng biểu tượng có sẵn hoặc ảnh riêng.
 
 ## Ảnh giao diện
+
+[![Màn hình nền Azr với hình nền xanh, Dock kính, Dynamic Island và widget](docs/assets/azr-desktop-blue.png)](docs/assets/azr-desktop-blue.png)
+
+*Bạn tùy biến Azr thế nào? [Chia sẻ ảnh desktop của bạn](https://github.com/Ericismee/Azr/discussions/3).*
 
 <details>
 <summary>Xem màn hình nền, bảng điều khiển kính và widget</summary>
