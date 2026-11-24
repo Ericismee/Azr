@@ -88,7 +88,7 @@ fn apply() {
                     if i < 2 { 0 } else { sh - 3 },
                 );
                 s.place(x, y, 3, 3);
-                s.set_visible(!crate::fullscreen::active());
+                s.set_visible(!crate::fullscreen::on_selected());
             }
         }
     });
@@ -129,7 +129,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             let down = GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0
                 || GetAsyncKeyState(VK_RBUTTON.0 as i32) < 0;
             if !down
-                && !crate::fullscreen::active()
+                && !crate::fullscreen::on_selected()
                 && !overlap::primary_fullscreen(focus::foreground())
             {
                 run(prefs::get().hot[i]);

@@ -73,6 +73,61 @@ fn rect_of(h: HWND) -> Option<Rect> {
     })
 }
 
+fn bottom_overlap(screen: RECT, bar: Rect) -> i32 {
+    let width = bar.right.min(screen.right) - bar.left.max(screen.left);
+    if width <= (screen.right - screen.left) / 2
+        || bar.bottom < screen.bottom
+        || bar.top <= screen.top
+    {
+        return 0;
+    }
+    (screen.bottom - bar.top).max(0)
+}
+
+pub fn visible_bottom_inset(screen: RECT) -> i32 {
+    let primary = primary();
+    if is_hidden() || primary.is_some_and(|h| abm_get_state(h) & ABS_AUTOHIDE != 0) {
+        return 0;
+    }
+    primary
+        .into_iter()
+        .chain(secondaries())
+        .filter(|&h| unsafe { IsWindowVisible(h).as_bool() })
+        .filter_map(rect_of)
+        .map(|bar| bottom_overlap(screen, bar))
+        .max()
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod bottom_inset_tests {
+    use super::*;
+
+    #[test]
+    fn reserves_only_the_bottom_taskbar_on_the_selected_display() {
+        let screen = RECT {
+            left: -1920,
+            top: 0,
+            right: 0,
+            bottom: 1080,
+        };
+        let mut bar = Rect {
+            left: -1920,
+            top: 1032,
+            right: 0,
+            bottom: 1080,
+        };
+        assert_eq!(bottom_overlap(screen, bar), 48);
+        bar.left = 0;
+        bar.right = 1920;
+        assert_eq!(bottom_overlap(screen, bar), 0);
+        bar.left = -48;
+        bar.right = 0;
+        bar.top = 0;
+        assert_eq!(bottom_overlap(screen, bar), 0);
+    }
+}
+
 fn abm_data(h: HWND) -> APPBARDATA {
     APPBARDATA {
         cbSize: std::mem::size_of::<APPBARDATA>() as u32,

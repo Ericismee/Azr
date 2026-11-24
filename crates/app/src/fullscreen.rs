@@ -1,11 +1,14 @@
 use azr_platform::wins::{focus, overlap, tracker};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::{Duration, Instant};
+use windows::Win32::Foundation::{HWND, POINT};
+use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MonitorFromWindow, MONITOR_DEFAULTTONULL};
 use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_RUNNING_D3D_FULL_SCREEN};
+use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 use windows::Win32::UI::WindowsAndMessaging::WM_APP;
 
 pub const WM_FULLSCREEN: u32 = WM_APP + 243;
-static ACTIVE: AtomicBool = AtomicBool::new(false);
+static ACTIVE_MONITOR: AtomicIsize = AtomicIsize::new(0);
 
 #[derive(Default)]
 struct FullscreenDetection {
@@ -44,7 +47,33 @@ thread_local! {
 }
 
 pub fn active() -> bool {
-    ACTIVE.load(Ordering::Relaxed)
+    ACTIVE_MONITOR.load(Ordering::Relaxed) != 0
+}
+
+pub fn on_window(hwnd: HWND) -> bool {
+    let monitor = ACTIVE_MONITOR.load(Ordering::Relaxed);
+    monitor != 0 && unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL).0 as isize == monitor }
+}
+
+pub fn on_point(point: POINT) -> bool {
+    let monitor = ACTIVE_MONITOR.load(Ordering::Relaxed);
+    monitor != 0 && unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL).0 as isize == monitor }
+}
+
+pub fn on_selected() -> bool {
+    if !active() {
+        return false;
+    }
+    let (x, y) = crate::display::selected().origin();
+    on_point(POINT { x, y })
+}
+
+pub fn on_pointer() -> bool {
+    if !active() {
+        return false;
+    }
+    let mut point = POINT::default();
+    unsafe { GetCursorPos(&mut point).is_ok() && on_point(point) }
 }
 
 pub fn foreground_for_overlap() -> isize {
@@ -73,17 +102,29 @@ pub fn poll() {
     let fullscreen = DETECTION.with(|state| {
         let mut state = state.borrow_mut();
         let detected = state.observe(pid, geometry, exclusive);
-        state.stabilize(active(), detected, Instant::now())
+        if detected {
+            state.inactive_since = None;
+            unsafe {
+                MonitorFromWindow(HWND(candidate as *mut _), MONITOR_DEFAULTTONULL).0 as isize
+            }
+        } else if state.stabilize(active(), false, Instant::now()) {
+            ACTIVE_MONITOR.load(Ordering::Relaxed)
+        } else {
+            0
+        }
     });
-    if ACTIVE.swap(fullscreen, Ordering::Relaxed) == fullscreen {
+    if ACTIVE_MONITOR.swap(fullscreen, Ordering::Relaxed) == fullscreen {
         return;
     }
-    if fullscreen {
-        crate::spotlight::close();
-        crate::mission::close();
-        crate::controlcenter::close();
+    if fullscreen != 0 {
+        crate::spotlight::close_for_fullscreen();
+        crate::mission::close_for_fullscreen();
+        crate::controlcenter::close_for_fullscreen();
     }
-    azr_platform::log::line("fullscreen", if fullscreen { "entered" } else { "left" });
+    azr_platform::log::line(
+        "fullscreen",
+        if fullscreen != 0 { "entered" } else { "left" },
+    );
     crate::prefs::broadcast_message(WM_FULLSCREEN);
 }
 

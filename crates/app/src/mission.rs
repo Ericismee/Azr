@@ -16,7 +16,7 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    RegisterHotKey, UnregisterHotKey, MOD_CONTROL, MOD_NOREPEAT, VK_ESCAPE, VK_UP,
+    VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Color;
@@ -25,7 +25,6 @@ use windows::UI::Composition::{
 };
 use windows_numerics::{Vector2, Vector3};
 
-const HOTKEY_ID: i32 = 0xAB03;
 const T_ANIM: usize = 1;
 const WM_ANIMATION_FRAME: u32 = WM_APP + 1;
 const ANIMATION_TIME: Duration = Duration::from_millis(190);
@@ -95,11 +94,19 @@ impl Drop for FramePump {
 
 struct Tile {
     hwnd: isize,
-    handle: isize,
+    handle: Option<isize>,
     from: Rect,
     to: Rect,
     title: String,
     last_rect: Option<(i32, i32, i32, i32)>,
+}
+
+impl Drop for Tile {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle {
+            thumbnail::unregister(handle);
+        }
+    }
 }
 
 struct Mc {
@@ -115,8 +122,8 @@ struct Mc {
     frames: Option<FramePump>,
     done: bool,
     hover: Option<usize>,
+    switch_selection: Option<usize>,
     highlight: SpriteVisual,
-    label: Option<SpriteVisual>,
     desks: Vec<(Rect, usize)>,
     plus: Option<Rect>,
     cur_desk: usize,
@@ -124,7 +131,6 @@ struct Mc {
 }
 
 struct Ctl {
-    hwnd: HWND,
     comp: Compositor,
 }
 
@@ -162,7 +168,7 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
             lpszClassName: class,
             ..Default::default()
         });
-        let hwnd = CreateWindowExW(
+        let _hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class,
             w!("Azr-mc-ctl"),
@@ -176,37 +182,9 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
             Some(hi),
             None,
         )?;
-        if RegisterHotKey(
-            Some(hwnd),
-            HOTKEY_ID,
-            MOD_CONTROL | MOD_NOREPEAT,
-            VK_UP.0 as u32,
-        )
-        .is_err()
-        {
-            log::line(
-                "mission",
-                "Ctrl+Atas dipakai program lain; hot key tidak aktif",
-            );
-        }
-        CTL.with(|c| {
-            *c.borrow_mut() = Some(Ctl {
-                hwnd,
-                comp: comp.clone(),
-            })
-        });
+        CTL.with(|c| *c.borrow_mut() = Some(Ctl { comp: comp.clone() }));
     }
     Ok(())
-}
-
-pub fn shutdown() {
-    CTL.with(|c| {
-        if let Some(ctl) = c.borrow().as_ref() {
-            unsafe {
-                let _ = UnregisterHotKey(Some(ctl.hwnd), HOTKEY_ID);
-            }
-        }
-    });
 }
 
 pub fn toggle() {
@@ -218,7 +196,7 @@ pub fn toggle() {
 }
 
 pub fn show() {
-    if crate::fullscreen::active() {
+    if crate::fullscreen::on_selected() {
         return;
     }
     if MC.with(|c| c.borrow().is_some()) {
@@ -249,12 +227,62 @@ pub fn show() {
     }
 }
 
+pub fn step_switch(reverse: bool) {
+    let active = focus::foreground();
+    show();
+    with_mc(|m| {
+        let count = m.tiles.len();
+        let selected = match m.switch_selection {
+            Some(i) if reverse => (i + count - 1) % count,
+            Some(i) => (i + 1) % count,
+            None => {
+                let mut other = m
+                    .tiles
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, tile)| tile.hwnd != active);
+                let first = if reverse {
+                    other.next_back()
+                } else {
+                    other.next()
+                };
+                first.map_or(0, |(i, _)| i)
+            }
+        };
+        m.switch_selection = Some(selected);
+        m.set_hover(Some(selected));
+    });
+}
+
+pub fn accept_alt_tab() {
+    if with_mc(|m| m.switch_selection.is_some()).unwrap_or(false) {
+        commit_switch();
+    }
+}
+
+pub fn commit_switch() {
+    let target = with_mc(|m| m.switch_selection.or(m.hover).map(|i| m.tiles[i].hwnd)).flatten();
+    close();
+    if let Some(hwnd) = target {
+        let activated = focus::force_foreground(hwnd);
+        if std::env::var_os("AZR_UI_TIMINGS").is_some() {
+            log::line(
+                "overview",
+                &format!("switch target={hwnd} activated={activated}"),
+            );
+        }
+    }
+}
+
+pub fn close_for_fullscreen() {
+    if with_mc(|m| crate::fullscreen::on_window(m.popup.hwnd)).unwrap_or(false) {
+        close();
+    }
+}
+
 pub fn close() {
     let m = MC.with(|c| c.borrow_mut().take());
     if let Some(m) = m {
-        for t in &m.tiles {
-            thumbnail::unregister(t.handle);
-        }
         let h = m.popup.hwnd;
         drop(m);
         unsafe {
@@ -269,8 +297,8 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
     let screen = display.size();
     let (ox, oy) = display.origin();
     let mut look = prefs::look(prefs::Role::Dark);
-    look.blur_sigma = look.blur_sigma.max(20.0);
-    look.tint = [120, 12, 14, 18];
+    look.blur_sigma = look.blur_sigma.clamp(12.0, 20.0);
+    look.tint = [72, 16, 20, 30];
     let base = azr_ui::glass::GlassParams::dark((10.0, 10.0), 0.0);
     let mut popup = Popup::new_with(
         comp,
@@ -285,22 +313,23 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
     popup.panel.set_radius(0.0)?;
     let dst = popup.hwnd.0 as isize;
 
-    let mut wins: Vec<_> = enumerate::list(std::process::id())
-        .into_iter()
-        .filter(|w| !focus::is_minimized(w.hwnd))
-        .collect();
+    let mut wins: Vec<_> = enumerate::list(std::process::id()).into_iter().collect();
     wins.sort_by_key(|w| std::cmp::Reverse(tracker::recent(w.hwnd)));
     let mut tiles = Vec::new();
     let mut sizes = Vec::new();
     for w in &wins {
-        let Some(handle) = thumbnail::register(dst, w.hwnd) else {
-            continue;
+        let handle = if focus::is_minimized(w.hwnd) {
+            None
+        } else {
+            thumbnail::register(dst, w.hwnd)
         };
-        let Some((sw, sh)) = thumbnail::source_size(handle) else {
-            thumbnail::unregister(handle);
-            continue;
+        let size = handle.and_then(thumbnail::source_size);
+        let (sw, sh) = size.unwrap_or((480, 300));
+        let (fx, fy, fw, fh) = if size.is_some() {
+            snapshot::frame_rect(w.hwnd).unwrap_or((ox, oy, sw, sh))
+        } else {
+            (ox, oy, sw, sh)
         };
-        let (fx, fy, fw, fh) = snapshot::frame_rect(w.hwnd).unwrap_or((0, 0, sw, sh));
         sizes.push((sw as f32, sh as f32));
         let title = if w.name.is_empty() {
             focus::title(w.hwnd)
@@ -309,7 +338,12 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
         };
         tiles.push(Tile {
             hwnd: w.hwnd,
-            handle,
+            handle: handle.filter(|handle| {
+                if size.is_none() {
+                    thumbnail::unregister(*handle);
+                }
+                size.is_some()
+            }),
             from: Rect {
                 x: (fx - ox) as f32,
                 y: (fy - oy) as f32,
@@ -327,15 +361,18 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
         });
     }
     if tiles.is_empty() {
+        unsafe {
+            let _ = DestroyWindow(popup.hwnd);
+        }
         return Ok(None);
     }
     let area = Rect {
         x: 60.0 * dpi,
-        y: 150.0 * dpi,
+        y: 124.0 * dpi,
         w: screen.0 as f32 - 120.0 * dpi,
-        h: screen.1 as f32 - 210.0 * dpi,
+        h: screen.1 as f32 - 172.0 * dpi,
     };
-    let g = grid(&sizes, area, 30.0 * dpi, 34.0 * dpi);
+    let g = grid(&sizes, area, 24.0 * dpi, 34.0 * dpi);
     for (t, r) in tiles.iter_mut().zip(g) {
         t.to = r;
     }
@@ -356,8 +393,8 @@ fn create(comp: &Compositor) -> windows_core::Result<Option<Box<Mc>>> {
         frames: None,
         done: false,
         hover: None,
+        switch_selection: None,
         highlight,
-        label: None,
         desks: vec![],
         plus: None,
         cur_desk: 0,
@@ -388,7 +425,9 @@ impl Mc {
                 (lerp(f.y, to.y, e) + lerp(f.h, to.h, e)).round() as i32,
             );
             if tile.last_rect != Some(r) {
-                thumbnail::place(tile.handle, r, 255);
+                if let Some(handle) = tile.handle {
+                    thumbnail::place(handle, r, 255);
+                }
                 tile.last_rect = Some(r);
             }
         }
@@ -412,6 +451,54 @@ impl Mc {
                 );
             }
             self.draw_desktops();
+            self.draw_window_labels();
+            let active = self.hover.take();
+            self.set_hover(active);
+        }
+    }
+
+    fn draw_window_labels(&mut self) {
+        let dpi = self.dpi;
+        for i in 0..self.tiles.len() {
+            let tile = &self.tiles[i];
+            let r = tile.to;
+            let title = tile.title.clone();
+            let missing = tile.handle.is_none();
+            self.card(
+                Rect {
+                    x: r.x - 5.0 * dpi,
+                    y: r.y - 5.0 * dpi,
+                    w: r.w + 10.0 * dpi,
+                    h: r.h + 34.0 * dpi,
+                },
+                12.0 * dpi,
+                Color {
+                    A: 52,
+                    R: 145,
+                    G: 169,
+                    B: 204,
+                },
+            );
+            if missing {
+                let _ = self.put_text(
+                    prefs::tr("Preview unavailable"),
+                    (12.0 * dpi) as i32,
+                    500,
+                    r.x,
+                    r.y + r.h / 2.0,
+                    r.w,
+                    0.75,
+                );
+            }
+            let _ = self.put_text(
+                &title,
+                (12.0 * dpi) as i32,
+                600,
+                r.x,
+                r.y + r.h + 7.0 * dpi,
+                r.w,
+                0.95,
+            );
         }
     }
 
@@ -492,13 +579,13 @@ impl Mc {
         let d = self.dpi;
         let (names, cur) = azr_platform::vdesk::list();
         self.cur_desk = cur;
-        let (cw, ch, gap) = (180.0 * d, 100.0 * d, 18.0 * d);
+        let (cw, ch, gap) = (144.0 * d, 64.0 * d, 12.0 * d);
         let n = names.len() as f32;
-        let plus_w = 64.0 * d;
+        let plus_w = 48.0 * d;
         let total = n * cw + (n - 1.0) * gap + gap + plus_w;
         let sw = self.popup.rect.2 as f32;
         let x0 = (sw - total) / 2.0;
-        let y = 28.0 * d;
+        let y = 37.0 * d;
         self.desks.clear();
         for (i, name) in names.iter().enumerate() {
             let r = Rect {
@@ -516,7 +603,7 @@ impl Mc {
                         h: r.h + 6.0 * d,
                     },
                     14.0 * d,
-                    crate::prefs::accent_c(255),
+                    crate::prefs::accent_c(175),
                 );
             }
             self.card(
@@ -569,10 +656,15 @@ impl Mc {
     }
 
     fn tile_at(&self, x: f32, y: f32) -> Option<usize> {
-        let pos = |t: &Tile| if self.done { t.to } else { t.from };
-        self.tiles.iter().position(|t| {
-            let r = pos(t);
-            x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h
+        self.tiles.iter().position(|tile| {
+            if self.done {
+                let r = tile.to;
+                x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h + 25.0 * self.dpi
+            } else {
+                tile.last_rect.is_some_and(|(l, t, r, b)| {
+                    x >= l as f32 && x < r as f32 && y >= t as f32 && y < b as f32
+                })
+            }
         })
     }
 
@@ -581,33 +673,13 @@ impl Mc {
             return;
         }
         self.hover = i;
-        if let Some(old) = self.label.take() {
-            if let Ok(k) = self.popup.content.Children() {
-                let _ = k.Remove(&old);
-            }
-        }
-        if let (Some(idx), true) = (i, self.done) {
-            let (r, title) = (self.tiles[idx].to, self.tiles[idx].title.clone());
-            if !title.is_empty() {
-                let d = self.dpi;
-                self.label = self.put_text(
-                    &title,
-                    (13.0 * d) as i32,
-                    600,
-                    r.x,
-                    r.y + r.h + 14.0 * d,
-                    r.w.max(120.0),
-                    1.0,
-                );
-            }
-        }
         match i.map(|i| self.tiles[i].to) {
             Some(r) if self.done => {
                 let pad = 7.0 * self.dpi;
                 let go = || -> windows_core::Result<()> {
                     self.highlight.SetSize(Vector2 {
                         X: r.w + 2.0 * pad,
-                        Y: r.h + 2.0 * pad,
+                        Y: r.h + 2.0 * pad + 22.0 * self.dpi,
                     })?;
                     self.highlight.SetOffset(Vector3 {
                         X: r.x - pad,
@@ -617,12 +689,12 @@ impl Mc {
                     self.highlight.SetBrush(
                         &self
                             .comp
-                            .CreateColorBrushWithColor(crate::prefs::accent_c(235))?,
+                            .CreateColorBrushWithColor(crate::prefs::accent_c(108))?,
                     )?;
                     let g = self.comp.CreateRoundedRectangleGeometry()?;
                     g.SetSize(Vector2 {
                         X: r.w + 2.0 * pad,
-                        Y: r.h + 2.0 * pad,
+                        Y: r.h + 2.0 * pad + 22.0 * self.dpi,
                     })?;
                     g.SetCornerRadius(Vector2 {
                         X: 10.0 * self.dpi,
@@ -674,14 +746,52 @@ unsafe extern "system" fn mc_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_MOUSEMOVE => {
             let (x, y) = ((lp.0 as i16) as f32, ((lp.0 >> 16) as i16) as f32);
             with_mc(|m| {
-                let i = m.tile_at(x, y);
-                m.set_hover(i);
+                if m.switch_selection.is_none() {
+                    let i = m.tile_at(x, y);
+                    m.set_hover(i);
+                }
             });
             LRESULT(0)
         }
+        WM_DISPLAYCHANGE | WM_DPICHANGED => {
+            let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+            LRESULT(0)
+        }
         WM_KEYDOWN => {
-            if wp.0 as u16 == VK_ESCAPE.0 {
+            let key = wp.0 as u16;
+            if key == VK_ESCAPE.0 {
                 close();
+            } else if key == VK_RETURN.0 {
+                commit_switch();
+            } else if [VK_LEFT.0, VK_RIGHT.0, VK_UP.0, VK_DOWN.0].contains(&key) {
+                with_mc(|m| {
+                    let Some(index) = m.hover else {
+                        m.set_hover(Some(0));
+                        return;
+                    };
+                    let origin = m.tiles[index].to;
+                    let mut candidates = m.tiles.iter().enumerate().filter_map(|(i, tile)| {
+                        let rect = tile.to;
+                        let dx = rect.x + rect.w / 2.0 - (origin.x + origin.w / 2.0);
+                        let dy = rect.y + rect.h / 2.0 - (origin.y + origin.h / 2.0);
+                        let (forward, lateral) = if key == VK_LEFT.0 {
+                            (-dx, dy)
+                        } else if key == VK_RIGHT.0 {
+                            (dx, dy)
+                        } else if key == VK_UP.0 {
+                            (-dy, dx)
+                        } else {
+                            (dy, dx)
+                        };
+                        (forward > 1.0).then_some((i, forward + 2.0 * lateral.abs()))
+                    });
+                    if let Some((i, _)) = candidates.by_ref().min_by(|a, b| a.1.total_cmp(&b.1)) {
+                        if m.switch_selection.is_some() {
+                            m.switch_selection = Some(i);
+                        }
+                        m.set_hover(Some(i));
+                    }
+                });
             }
             LRESULT(0)
         }
@@ -722,7 +832,7 @@ unsafe extern "system" fn mc_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let target = with_mc(|m| m.tile_at(x, y).map(|i| m.tiles[i].hwnd)).flatten();
             close();
             if let Some(h) = target {
-                focus::activate(h, 0);
+                focus::force_foreground(h);
             }
             LRESULT(0)
         }

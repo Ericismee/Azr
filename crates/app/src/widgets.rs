@@ -373,7 +373,7 @@ pub fn set_control_center_area(area: Option<RECT>) {
 
 impl Mgr {
     fn widget_visible(&self, pos: (i32, i32), size: (f32, f32)) -> bool {
-        !crate::fullscreen::active()
+        !crate::fullscreen::on_point(POINT { x: pos.0, y: pos.1 })
             && !self.control_center_area.is_some_and(|area| {
                 pos.0 < area.right
                     && pos.1 < area.bottom
@@ -989,16 +989,19 @@ impl Mgr {
                     0,
                     1.0,
                 );
-                let labels = calendar::weekday_labels(!en());
+                let labels = azr_core::i18n::weekday_labels(
+                    prefs::get().lang,
+                    !en(),
+                    calendar::weekday_labels(!en()),
+                );
                 let (gx, gy) = (10.0 * d, 30.0 * d);
                 let cw = (w - 2.0 * gx) / 7.0;
                 let rows = g.rows.max(5) as f32;
                 let ch = (h - gy - 8.0 * d) / (rows + 1.0);
-                for (k, l) in labels.iter().enumerate() {
-                    let s: String = l.chars().take(1).collect();
+                for (k, label) in labels.iter().enumerate() {
                     self.text(
                         p,
-                        &s,
+                        label,
                         9.0 * d,
                         600,
                         fg,
@@ -1308,7 +1311,7 @@ impl Mgr {
     }
 
     fn tick(&mut self) {
-        if crate::fullscreen::active() {
+        if crate::fullscreen::on_selected() {
             return;
         }
         self.ticks = self.ticks.wrapping_add(1);
@@ -1681,7 +1684,7 @@ impl Mgr {
     }
 
     fn open_gallery(&mut self) {
-        if crate::fullscreen::active() {
+        if crate::fullscreen::on_selected() {
             return;
         }
         if self.gallery.is_some() {
@@ -2056,7 +2059,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
     match msg {
         crate::fullscreen::WM_FULLSCREEN => {
             with(|m| {
-                let active = crate::fullscreen::active();
+                let active = crate::fullscreen::on_selected();
                 if active {
                     m.close_gallery();
                     m.finish_close_gallery();

@@ -9,7 +9,7 @@
 [Setup]
 AppId={{B35F3A75-BE5C-4A91-9962-EAC9CC889BC3}
 AppName=Azr
-AppVersion=0.1.5
+AppVersion=0.1.6
 AppPublisher=Ericismee
 AppPublisherURL=https://github.com/Ericismee/Azr
 DefaultDirName={localappdata}\Programs\Azr
@@ -20,7 +20,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.22000
 OutputDir={#OutputPath}
-OutputBaseFilename=Azr-Setup-0.1.5-x64
+OutputBaseFilename=Azr-Setup-0.1.6-x64
 SetupIconFile=..\assets\azr.ico
 UninstallDisplayIcon={app}\azr.exe
 VersionInfoProductName=Azr
@@ -47,8 +47,8 @@ Source: "{#PayloadDir}\fonts\*"; DestDir: "{app}\fonts"; Flags: ignoreversion
 Source: "{#PayloadDir}\brand\azr-liquid-glass.png"; DestDir: "{app}\brand"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Azr"; Filename: "{app}\azr.exe"; WorkingDir: "{app}"; IconFilename: "{app}\azr.exe"; AppUserModelID: "Ericismee.Azr"
-Name: "{autodesktop}\Azr"; Filename: "{app}\azr.exe"; WorkingDir: "{app}"; IconFilename: "{app}\azr.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Azr"; Filename: "{app}\azr.exe"; Parameters: "--open-settings"; WorkingDir: "{app}"; IconFilename: "{app}\azr.exe"; AppUserModelID: "Ericismee.Azr"
+Name: "{autodesktop}\Azr"; Filename: "{app}\azr.exe"; Parameters: "--open-settings"; WorkingDir: "{app}"; IconFilename: "{app}\azr.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\azr.exe"; Description: "Open Azr"; Flags: nowait postinstall skipifsilent

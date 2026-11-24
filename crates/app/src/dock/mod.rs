@@ -7,12 +7,12 @@ mod view;
 
 use crate::paths;
 use crate::strip::Strip;
+use azr_core::dock::hide::{self, IdleHide, IdleTimer, RevealZone};
 use azr_core::dock::items::{key_of, merge, package_family, Item, Pin};
 use azr_core::dock::layout::{hit, layout, Layout, Metrics, Slot};
 use azr_core::dock::reorder;
 use azr_core::visibility::policy::{should_hide, Inputs, Mode};
 use azr_platform::icons;
-use azr_platform::wins::overlap::{self, Overlap};
 use azr_platform::wins::{enumerate, focus, tracker};
 use azr_platform::{launch, log, sys};
 use azr_ui::gfx::Gfx;
@@ -64,6 +64,8 @@ const TIMER_RECONF: usize = 110;
 const TIMER_TRASH: usize = 111;
 const TIMER_REVEAL: usize = 112;
 const TIMER_PEEK: usize = 113;
+const TIMER_SMART_HIDE: usize = 114;
+const TIMER_SMART_EDGE: usize = 115;
 const TRASH_POLL_MS: u32 = 4000;
 const WM_DISPLAYCHANGE: u32 = 0x007E;
 const WM_DPICHANGED: u32 = 0x02E0;
@@ -149,6 +151,7 @@ pub struct Dock {
     win: (i32, i32),
     win_pos: (i32, i32),
     origin: (i32, i32),
+    taskbar_inset: i32,
     card_y: f32,
     card_h: f32,
     margin: f32,
@@ -203,7 +206,9 @@ pub struct Dock {
     shown: bool,
     starting: bool,
     revealing: bool,
-    overlap: Overlap,
+    fullscreen: bool,
+    idle_timer: IdleTimer,
+    smart_edge: Option<RevealZone>,
     grace: bool,
     menu_open: bool,
     preview_hover: bool,
@@ -409,6 +414,7 @@ impl Dock {
                 win: (400, 120),
                 win_pos: (0, 0),
                 origin: display.origin(),
+                taskbar_inset: azr_platform::shell::taskbar::visible_bottom_inset(display.bounds),
                 card_y: 0.0,
                 card_h: 0.0,
                 margin: 8.0 * dpi,
@@ -464,16 +470,18 @@ impl Dock {
                 shown: true,
                 starting: true,
                 revealing: false,
-                overlap: Overlap::default(),
+                fullscreen: false,
+                idle_timer: IdleTimer::default(),
+                smart_edge: None,
                 grace: false,
                 menu_open: false,
                 preview_hover: false,
                 preview_outside_since: None,
                 tier,
-                strip: if mode == Mode::Always {
-                    None
-                } else {
+                strip: if mode == Mode::OnDemand {
                     Strip::new(hwnd, STRIP_ENTER, STRIP_LEAVE).ok()
+                } else {
+                    None
                 },
                 tooltip: None,
                 preview: None,
@@ -497,7 +505,7 @@ impl Dock {
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             with_dock(hwnd, |d| {
                 d.animate_stage(0.0);
-                d.sync_strip();
+                d.sync_reveal_trigger();
                 if appbar {
                     d.reserve_strip();
                 }
@@ -555,7 +563,7 @@ impl Dock {
         self.win.0 = w;
         self.win_pos = (
             self.origin.0 + (self.screen.0 - w) / 2,
-            self.origin.1 + self.screen.1 - self.win.1,
+            self.origin.1 + self.screen.1 - self.taskbar_inset - self.win.1,
         );
         unsafe {
             let _ = SetWindowPos(
@@ -592,8 +600,14 @@ impl Dock {
         let display = crate::display::selected();
         let screen = display.size();
         let dpi = display.dpi() * crate::prefs::ui_scale();
+        let inset = azr_platform::shell::taskbar::visible_bottom_inset(display.bounds);
         if screen == self.screen && display.origin() == self.origin && (dpi - self.dpi).abs() < 0.01
         {
+            if self.taskbar_inset != inset {
+                self.taskbar_inset = inset;
+                self.hide_popups();
+                self.resize_window();
+            }
             return;
         }
         log::line(
@@ -606,8 +620,12 @@ impl Dock {
         self.hide_popups();
         self.tooltip = None;
         self.preview = None;
+        if self.menu_open {
+            self.on_menu_close();
+        }
         self.menu = None;
         self.origin = display.origin();
+        self.taskbar_inset = inset;
         self.screen = screen;
         self.dpi = dpi;
         self.m = metrics_from_prefs(dpi);
@@ -707,27 +725,45 @@ impl Dock {
             || self.grace
     }
 
-    fn card_screen_rect(&self) -> (i32, i32, i32, i32) {
-        let rest = layout(&self.slots, None, self.win.0 as f32, &self.m);
-        let cw = rest.total + 2.0 * self.pad_side;
-        let cx = (self.win.0 as f32 - cw) / 2.0;
-        let l = self.win_pos.0 + cx as i32;
-        let t = self.win_pos.1 + self.card_y as i32;
-        (
-            l,
-            t,
-            l + cw.ceil() as i32,
-            t + (self.card_h + self.margin) as i32,
-        )
+    fn cursor_over_dock(&self) -> bool {
+        let mut point = POINT::default();
+        self.shown
+            && unsafe { GetCursorPos(&mut point).is_ok() && WindowFromPoint(point) == self.hwnd }
+    }
+
+    fn smart_should_hide(&mut self) -> bool {
+        let hovered = self.cursor_over_dock();
+        let busy = hovered
+            || self.preview.as_ref().is_some_and(Preview::contains_cursor)
+            || self.menu_open
+            || self.press.is_some()
+            || self.dragging.is_some()
+            || self.grace
+            || self.revealing;
+        let delay = Duration::from_secs(u64::from(crate::prefs::get().dock_hide_delay));
+        match self.idle_timer.update(Instant::now(), delay, busy) {
+            IdleHide::Keep => {
+                if hovered {
+                    timer(self.hwnd, TIMER_SMART_HIDE, 150);
+                }
+                false
+            }
+            IdleHide::Wait(_) if !self.shown => true,
+            IdleHide::Wait(remaining) => {
+                timer(
+                    self.hwnd,
+                    TIMER_SMART_HIDE,
+                    remaining.as_millis() as u32 + 1,
+                );
+                false
+            }
+            IdleHide::Hide => true,
+        }
     }
 
     fn place_strip(&self) {
         if let Some(s) = &self.strip {
-            let depth = if self.opts.mode == Mode::AutoHide {
-                (6.0 * self.dpi).round() as i32
-            } else {
-                2
-            };
+            let depth = 2;
             s.place(
                 self.win_pos.0,
                 self.origin.1 + self.screen.1 - depth,
@@ -737,9 +773,39 @@ impl Dock {
         }
     }
 
-    fn sync_strip(&self) {
+    fn cursor_in_reveal_zone(&self) -> bool {
+        let mut point = POINT::default();
+        let left = self.win_pos.0;
+        let bottom = self.origin.1 + self.screen.1;
+        let depth = (14.0 * self.dpi).round() as i32;
+        let bounds = (left, bottom - depth, left + self.win.0, bottom);
+        (unsafe { GetCursorPos(&mut point).is_ok() }) && hide::contains(bounds, (point.x, point.y))
+    }
+
+    fn sync_reveal_trigger(&mut self) {
+        let hidden = !self.off && !self.shown && !self.fullscreen;
         if let Some(s) = &self.strip {
-            s.set_visible(!self.off && !self.shown && !self.overlap.fullscreen);
+            s.set_visible(hidden);
+        }
+        if hidden && self.opts.mode == Mode::AutoHide {
+            if self.smart_edge.is_none() {
+                self.smart_edge = Some(RevealZone::new(self.cursor_in_reveal_zone()));
+                timer(self.hwnd, TIMER_SMART_EDGE, 32);
+            }
+        } else if self.smart_edge.take().is_some() {
+            kill(self.hwnd, TIMER_SMART_EDGE);
+        }
+    }
+
+    fn poll_smart_edge(&mut self) {
+        let inside = self.cursor_in_reveal_zone();
+        if self
+            .smart_edge
+            .as_mut()
+            .is_some_and(|edge| edge.should_reveal(Instant::now(), inside))
+        {
+            self.start_grace();
+            self.update_visibility();
         }
     }
 
@@ -754,16 +820,24 @@ impl Dock {
     }
 
     fn update_visibility(&mut self) {
-        let inputs = Inputs {
-            overlapped: self.overlap.overlapped,
-            interacting: self.interacting(),
-            edge_armed: false,
-            starting: self.starting,
-            fullscreen: self.overlap.fullscreen,
-            revealing: self.revealing,
+        kill(self.hwnd, TIMER_SMART_HIDE);
+        let hide = if self.off || self.fullscreen || self.opts.mode != Mode::AutoHide {
+            self.idle_timer = IdleTimer::default();
+            self.off
+                || should_hide(
+                    self.opts.mode,
+                    &Inputs {
+                        interacting: self.interacting(),
+                        starting: self.starting,
+                        fullscreen: self.fullscreen,
+                        revealing: self.revealing,
+                        ..Inputs::default()
+                    },
+                )
+        } else {
+            self.smart_should_hide()
         };
-        let hide = self.off || should_hide(self.opts.mode, &inputs);
-        if self.overlap.fullscreen {
+        if self.fullscreen {
             if self.shown || unsafe { IsWindowVisible(self.hwnd).as_bool() } {
                 self.shown = false;
                 kill(self.hwnd, TIMER_DWELL);
@@ -778,7 +852,7 @@ impl Dock {
                     let _ = ShowWindow(self.hwnd, SW_HIDE);
                 }
             }
-            self.sync_strip();
+            self.sync_reveal_trigger();
             return;
         }
         if hide && self.shown {
@@ -797,7 +871,7 @@ impl Dock {
             self.animate_stage(0.0);
             log::line("dock", "tampil");
         }
-        self.sync_strip();
+        self.sync_reveal_trigger();
     }
 
     fn start_grace(&mut self) {
@@ -806,13 +880,8 @@ impl Dock {
     }
 
     pub fn refresh_windows(&mut self) {
-        self.overlap = overlap::evaluate(
-            crate::fullscreen::foreground_for_overlap(),
-            self.hwnd,
-            self.card_screen_rect(),
-        );
-        self.overlap.fullscreen = crate::fullscreen::active();
-        if self.overlap.fullscreen {
+        self.fullscreen = crate::fullscreen::on_window(self.hwnd);
+        if self.fullscreen {
             self.update_visibility();
             return;
         }
@@ -1225,7 +1294,7 @@ impl Dock {
             let was_appbar = self.opts.appbar;
             self.opts.mode = mode;
             self.opts.appbar = appbar;
-            if mode == Mode::Always {
+            if mode != Mode::OnDemand {
                 self.strip = None;
             } else if self.strip.is_none() {
                 self.strip = Strip::new(self.hwnd, STRIP_ENTER, STRIP_LEAVE).ok();
@@ -1236,7 +1305,7 @@ impl Dock {
             } else if was_appbar {
                 azr_platform::shell::appbar::release_bottom();
             }
-            self.sync_strip();
+            self.sync_reveal_trigger();
             self.update_visibility();
             log::line("dock", &format!("perilaku → {mode:?} cadangan={appbar}"));
         }
@@ -1348,7 +1417,7 @@ impl Dock {
     }
 
     fn show_preview(&mut self) {
-        if crate::fullscreen::active() {
+        if self.fullscreen {
             return;
         }
         let Some(slot) = self.hover else { return };
@@ -1475,7 +1544,7 @@ impl Dock {
                     matches!(entry, Entry::App(i) if self.items.get(i).is_some_and(|item| item.running()))
                 });
                 if running {
-                    timer(self.hwnd, TIMER_PREVIEW, if preview_up { 85 } else { 280 });
+                    timer(self.hwnd, TIMER_PREVIEW, if preview_up { 65 } else { 215 });
                 } else {
                     if let Some(preview) = self.preview.as_mut() {
                         preview.hide();
@@ -1498,7 +1567,6 @@ impl Dock {
         } else {
             self.apply(Some(x), true);
         }
-        self.update_visibility();
     }
 
     fn on_leave(&mut self) {
@@ -1520,7 +1588,9 @@ impl Dock {
             self.apply(None, true);
         }
         timer(self.hwnd, TIMER_REGION, 450);
-        self.start_grace();
+        if self.opts.mode != Mode::AutoHide {
+            self.start_grace();
+        }
         self.update_visibility();
     }
 
@@ -1663,20 +1733,24 @@ impl Dock {
                         windows::Win32::UI::Input::KeyboardAndMouse::VK_SHIFT.0 as i32,
                     ) < 0
                 };
-                if azr_platform::launch::is_task_manager_path(&it.path) {
-                    launch::task_manager();
-                } else if it.hwnds.len() > 1 && !new_window {
-                    self.hover = Some(idx);
-                    self.show_preview();
-                } else if let Some(&target) = it.hwnds.first().filter(|_| !new_window) {
-                    let h = HWND(target as *mut _);
-                    let fg = HWND(focus::foreground() as *mut _);
-                    let front = fg == h || unsafe { GetAncestor(fg, GA_ROOTOWNER) == h };
-                    if front && !focus::is_minimized(target) {
-                        focus::request_close(target);
-                    } else {
-                        self.activate_target(target);
+                let task_manager = launch::is_task_manager_path(&it.path);
+                let foreground = focus::foreground();
+                let owning_window =
+                    unsafe { GetAncestor(HWND(foreground as *mut _), GA_ROOTOWNER) }.0 as isize;
+                let visible = it
+                    .hwnds
+                    .iter()
+                    .copied()
+                    .find(|&h| h == foreground || h == owning_window);
+                let target =
+                    visible.or_else(|| it.hwnds.iter().copied().find(|&h| focus::is_alive(h)));
+
+                if let Some(target) = target.filter(|_| !new_window) {
+                    if !self.activate_target(target) && task_manager && visible.is_none() {
+                        launch::task_manager();
                     }
+                } else if task_manager {
+                    launch::task_manager();
                 } else {
                     launch::open(&it.path);
                     if let Some(v) = self.views.get(idx) {
@@ -2258,10 +2332,15 @@ impl Dock {
     }
 
     fn on_timer(&mut self, id: usize) {
+        if id == TIMER_SMART_EDGE {
+            self.poll_smart_edge();
+            return;
+        }
         kill(self.hwnd, id);
         match id {
             TIMER_WINDOWS => self.refresh_windows(),
             TIMER_APPBAR => {
+                self.on_reconfigure();
                 if self.opts.appbar {
                     self.reserve_strip();
                 }
@@ -2269,7 +2348,7 @@ impl Dock {
             TIMER_TIP => self.show_tooltip(),
             TIMER_PREVIEW => self.show_preview(),
             TIMER_PEEK => {
-                if !crate::fullscreen::active() {
+                if !self.fullscreen {
                     if let Some(preview) = &mut self.preview {
                         if let Err(e) = preview.show_peek(&self.comp) {
                             log::line("preview", &format!("peek: {e}"));
@@ -2283,7 +2362,7 @@ impl Dock {
             }
             TIMER_DWELL => {
                 if !self.shown
-                    && !self.overlap.fullscreen
+                    && !self.fullscreen
                     && self.strip.as_ref().is_some_and(Strip::cursor_inside)
                 {
                     self.start_grace();
@@ -2291,6 +2370,7 @@ impl Dock {
                 }
             }
             TIMER_PREVIEW_GUARD => self.guard_preview(),
+            TIMER_SMART_HIDE => self.update_visibility(),
             TIMER_HIDEWIN => {
                 if !self.shown {
                     unsafe {
@@ -2313,7 +2393,7 @@ impl Dock {
             }
             TIMER_RECONF => self.on_reconfigure(),
             TIMER_TRASH => {
-                if !self.overlap.fullscreen {
+                if !self.fullscreen {
                     let full = azr_platform::recycle::is_full();
                     if full != self.trash_full {
                         self.trash_full = full;
@@ -2327,16 +2407,8 @@ impl Dock {
     }
 
     fn on_strip_enter(&mut self) {
-        if !self.shown && !self.overlap.fullscreen && self.opts.mode != Mode::Always {
-            timer(
-                self.hwnd,
-                TIMER_DWELL,
-                if self.opts.mode == Mode::AutoHide {
-                    60
-                } else {
-                    150
-                },
-            );
+        if !self.shown && !self.fullscreen && self.opts.mode == Mode::OnDemand {
+            timer(self.hwnd, TIMER_DWELL, 150);
         }
     }
 
@@ -2404,7 +2476,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_LBUTTONUP => {
             let (x, y) = xy(lp);
-            with_dock(hwnd, |d| d.on_up(x, y));
+            with_dock(hwnd, |d| {
+                d.on_up(x, y);
+                d.update_visibility();
+            });
             LRESULT(0)
         }
         WM_CAPTURECHANGED => {
@@ -2414,6 +2489,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     d.apply(None, false);
                     d.bind_expressions();
                 }
+                d.press = None;
+                d.update_visibility();
             });
             LRESULT(0)
         }
@@ -2475,6 +2552,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         PREVIEW_MOVE => {
             if let Some(arm) = with_dock(hwnd, |d| {
                 d.preview_hover = true;
+                d.update_visibility();
                 d.preview
                     .as_mut()?
                     .update_peek_target(lp.0 as i16 as i32, (lp.0 >> 16) as i16 as i32)
@@ -2498,6 +2576,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 if let Some(preview) = &mut d.preview {
                     preview.cancel_peek();
                 }
+                d.update_visibility();
             });
             LRESULT(0)
         }
@@ -2513,6 +2592,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_SETTINGCHANGE | WM_POWERBROADCAST => {
             with_dock(hwnd, |d| d.refresh_tier());
+            if msg == WM_SETTINGCHANGE && wp.0 == SPI_SETWORKAREA.0 as usize {
+                timer(hwnd, TIMER_RECONF, 400);
+            }
             DefWindowProcW(hwnd, msg, wp, lp)
         }
         WM_DESTROY => {

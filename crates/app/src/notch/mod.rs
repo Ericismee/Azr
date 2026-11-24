@@ -2142,7 +2142,7 @@ impl Notch {
                     self.hwnd,
                     self.pill_screen_rect(),
                 );
-                ov.fullscreen = crate::fullscreen::active();
+                ov.fullscreen = crate::fullscreen::on_selected();
                 if ov != self.overlap {
                     let was_fullscreen = self.overlap.fullscreen;
                     self.overlap = ov;

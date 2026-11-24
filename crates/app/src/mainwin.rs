@@ -1,4 +1,4 @@
-use crate::{paths, single_instance};
+use crate::paths;
 use azr_platform::shell::taskbar;
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use windows::core::{w, PCWSTR};
@@ -204,10 +204,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 _ => {}
             }
-            LRESULT(0)
-        }
-        single_instance::WM_WAKE => {
-            azr_platform::log::line("instance", "peluncuran kedua terdeteksi");
             LRESULT(0)
         }
         WM_TIMER if wp.0 == TIMER_FULLSCREEN => {

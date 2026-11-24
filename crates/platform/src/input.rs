@@ -34,7 +34,6 @@ unsafe extern "system" fn proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     WPARAM(0),
                     LPARAM(packed as isize),
                 );
-                return LRESULT(1);
             }
         }
     }

@@ -473,7 +473,7 @@ impl St {
     }
 
     fn refresh(&mut self) {
-        if crate::fullscreen::active() {
+        if crate::fullscreen::on_selected() {
             return;
         }
         let now = std::time::Instant::now();
@@ -1205,7 +1205,7 @@ impl St {
             e.place(if right { sw - ew } else { 0 }, 0, ew, sh);
             e.set_visible(true);
         }
-        let was_shown = strip.shown && !crate::fullscreen::active();
+        let was_shown = strip.shown && !crate::fullscreen::on_selected();
         strip.hover = None;
         if was_shown {
             strip.popup.show();
@@ -1292,7 +1292,7 @@ impl St {
     }
 
     fn check_overlap(&mut self) {
-        if crate::fullscreen::active() {
+        if crate::fullscreen::on_selected() {
             if let Some(strip) = self.strip.as_mut() {
                 strip.shown = false;
                 strip.popup.hide();
@@ -1367,7 +1367,7 @@ impl St {
     }
 
     fn refresh_shots(&mut self, queue: bool) {
-        if crate::fullscreen::active() || self.strip.is_none() || self.fly.is_some() {
+        if crate::fullscreen::on_selected() || self.strip.is_none() || self.fly.is_some() {
             return;
         }
         if self.shot_worker.is_none() {
@@ -1542,7 +1542,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
     match msg {
         crate::fullscreen::WM_FULLSCREEN => {
             with(|s| {
-                let active = crate::fullscreen::active();
+                let active = crate::fullscreen::on_selected();
                 if active {
                     s.finish_fly();
                     s.peek = false;

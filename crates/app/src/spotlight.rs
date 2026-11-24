@@ -20,9 +20,8 @@ use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, RegisterHotKey, TrackMouseEvent, UnregisterHotKey, MOD_ALT, MOD_CONTROL,
-    MOD_NOREPEAT, MOD_SHIFT, TME_LEAVE, TRACKMOUSEEVENT, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN,
-    VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
+    GetKeyState, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VK_BACK, VK_CONTROL, VK_DELETE,
+    VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::UI::Color;
@@ -45,8 +44,6 @@ const T_FINISH: usize = 9;
 const T_FILE_QUERY: usize = 10;
 const T_ICON_REFRESH: usize = 11;
 const FILE_QUERY_DELAY_MS: u32 = 130;
-const HOTKEY_ID: i32 = 0xAB01;
-const HOTKEY_APPS: i32 = 0xAB02;
 const COLS: usize = 5;
 const FTYPES: [(&str, &[&str]); 4] = [
     (
@@ -250,11 +247,8 @@ fn spring(
     let _ = go();
 }
 
-const SEARCH_SHORTCUT: &str = "Alt + Space";
-
 struct Ctl {
     hwnd: HWND,
-    search_hotkey: bool,
     comp: Compositor,
 }
 
@@ -351,25 +345,11 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
             Some(hi),
             None,
         )?;
-        let search_hotkey = RegisterHotKey(
-            Some(hwnd),
-            HOTKEY_ID,
-            MOD_ALT | MOD_NOREPEAT,
-            VK_SPACE.0 as u32,
-        )
-        .is_ok();
-        if !search_hotkey {
-            log::line(
-                "spotlight",
-                "Alt+Space is already registered; open Search from the menu or Dock",
-            );
-        }
-        sync_launchpad_key(hwnd);
+        crate::shortcuts::init(hwnd);
         let h = hwnd.0 as isize;
         CTL.with(|c| {
             *c.borrow_mut() = Some(Ctl {
                 hwnd,
-                search_hotkey,
                 comp: comp.clone(),
             })
         });
@@ -382,47 +362,12 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
     Ok(())
 }
 
-pub fn shortcut_label() -> Option<&'static str> {
-    CTL.with(|c| {
-        c.borrow()
-            .as_ref()
-            .filter(|ctl| ctl.search_hotkey)
-            .map(|_| SEARCH_SHORTCUT)
-    })
-}
-
-fn sync_launchpad_key(hwnd: HWND) {
-    thread_local! { static BOUND: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) }; }
-    let key = prefs::get().launchpad_key;
-    if BOUND.replace(Some(key)) == Some(key) {
-        return;
-    }
-    crate::launchpad::bind_windows_key(hwnd, key == 1);
-    let (mods, vk) = if key == 2 {
-        (
-            MOD_CONTROL | windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT,
-            b'L' as u32,
-        )
-    } else {
-        (MOD_CONTROL | MOD_SHIFT, VK_SPACE.0 as u32)
-    };
-    unsafe {
-        let _ = UnregisterHotKey(Some(hwnd), HOTKEY_APPS);
-        if RegisterHotKey(Some(hwnd), HOTKEY_APPS, mods | MOD_NOREPEAT, vk).is_err() {
-            log::line("launchpad", "Configured shortcut is already in use");
-        }
-    }
+pub fn shortcut_label() -> Option<String> {
+    crate::shortcuts::active_label(azr_core::shortcuts::Command::Search)
 }
 
 pub fn shutdown() {
-    CTL.with(|c| {
-        if let Some(ctl) = c.borrow().as_ref() {
-            unsafe {
-                let _ = UnregisterHotKey(Some(ctl.hwnd), HOTKEY_ID);
-                let _ = UnregisterHotKey(Some(ctl.hwnd), HOTKEY_APPS);
-            }
-        }
-    });
+    crate::shortcuts::shutdown();
 }
 
 pub fn toggle() {
@@ -430,7 +375,8 @@ pub fn toggle() {
 }
 
 pub fn toggle_mode(mode: Mode) {
-    if crate::fullscreen::active() {
+    let started = std::time::Instant::now();
+    if crate::fullscreen::on_pointer() {
         return;
     }
     let open_mode = SPOT.with(|c| c.borrow().as_ref().map(|s| s.mode));
@@ -449,6 +395,7 @@ pub fn toggle_mode(mode: Mode) {
     let Some(comp) = comp else { return };
     match create(&comp, mode) {
         Ok(s) => {
+            let prepared = started.elapsed();
             SPOT.with(|c| *c.borrow_mut() = Some(s));
             with_spot(|s| {
                 s.reset_state(mode);
@@ -459,6 +406,21 @@ pub fn toggle_mode(mode: Mode) {
                 let _ = crate::motion::scalar(&s.comp, &root, "Opacity", 0.0, 1.0, 80);
                 let _ = root.SetOpacity(1.0);
             });
+            if std::env::var_os("AZR_UI_TIMINGS").is_some() {
+                let kind = if mode == Mode::Apps {
+                    "launchpad"
+                } else {
+                    "quick-search"
+                };
+                azr_platform::log::line(
+                    "ui-timing",
+                    &format!(
+                        "{kind} setup_ms={:.1} ready_ms={:.1}",
+                        prepared.as_secs_f64() * 1000.0,
+                        started.elapsed().as_secs_f64() * 1000.0
+                    ),
+                );
+            }
             let h = CTL
                 .with(|c| c.borrow().as_ref().map(|c| c.hwnd.0 as isize))
                 .unwrap_or(0);
@@ -467,6 +429,12 @@ pub fn toggle_mode(mode: Mode) {
             });
         }
         Err(e) => log::line("spotlight", &format!("gagal: {e}")),
+    }
+}
+
+pub fn close_for_fullscreen() {
+    if with_spot(|s| crate::fullscreen::on_window(s.popup.hwnd)).unwrap_or(false) {
+        close();
     }
 }
 
@@ -1140,37 +1108,12 @@ impl Spot {
         op: f32,
         max_w: f32,
     ) -> f32 {
-        if s.is_empty() {
+        let Some((surface, w, h)) = self.text_surface(s, px, weight, rgb, max_w) else {
             return 0.0;
-        }
-        let key = format!("{px}|{weight}|{rgb:?}|{}|{s}", max_w as i32);
-        let hit = self.text_cache.get(&key).cloned();
-        let (surf, w, h) = match hit {
-            Some(v) => v,
-            None => {
-                let style = Style { px, weight };
-                let (tw, th) = measure(s, &style);
-                let tw = (tw + 2).min(max_w as i32).max(2);
-                let Some(bmp) = render(s, &style, tw, th) else {
-                    return 0.0;
-                };
-                let Ok(sf) = self
-                    .gfx
-                    .surface_from_bgra(bmp.w, bmp.h, &recolor(&bmp, rgb))
-                else {
-                    return 0.0;
-                };
-                if self.text_cache.len() > 300 {
-                    self.text_cache.clear();
-                }
-                let v = (sf, tw, th);
-                self.text_cache.insert(key, v.clone());
-                v
-            }
         };
         self.sprite(
             parent,
-            &surf,
+            &surface,
             x,
             cy - h as f32 / 2.0,
             w as f32,
@@ -1178,6 +1121,37 @@ impl Spot {
             op,
         );
         w as f32
+    }
+
+    fn text_surface(
+        &mut self,
+        text: &str,
+        px: i32,
+        weight: i32,
+        rgb: [u8; 3],
+        max_w: f32,
+    ) -> Option<(CompositionDrawingSurface, i32, i32)> {
+        if text.is_empty() {
+            return None;
+        }
+        let key = format!("{px}|{weight}|{rgb:?}|{}|{text}", max_w as i32);
+        if let Some(cached) = self.text_cache.get(&key) {
+            return Some(cached.clone());
+        }
+        let style = Style { px, weight };
+        let (tw, th) = measure(text, &style);
+        let tw = (tw + 2).min(max_w as i32).max(2);
+        let bmp = render(text, &style, tw, th)?;
+        let surface = self
+            .gfx
+            .surface_from_bgra(bmp.w, bmp.h, &recolor(&bmp, rgb))
+            .ok()?;
+        if self.text_cache.len() > 300 {
+            self.text_cache.clear();
+        }
+        let value = (surface, tw, th);
+        self.text_cache.insert(key, value.clone());
+        Some(value)
     }
 
     fn text_w(&self, s: &str, px: i32, weight: i32) -> f32 {
@@ -1466,7 +1440,7 @@ impl Spot {
         let shortcut = self
             .hover_mode
             .map(|m| format!("Ctrl {}", m.digit()))
-            .or_else(|| shortcut_label().map(str::to_owned));
+            .or_else(|| shortcut_label());
         if let Some(key) = shortcut {
             let kpx = (12.0 * d).round() as i32;
             let kw = self.text_w(&key, kpx, 500) + 14.0 * d;
@@ -1996,18 +1970,19 @@ impl Spot {
                     );
                 }
                 let lpx = (12.0 * d).round() as i32;
-                let lw = self.text_w(&row.title, lpx, 400).min(cw - 10.0 * d);
-                self.text(
-                    area,
-                    &row.title,
-                    cx - lw / 2.0,
-                    iy + icon + 13.0 * d,
-                    lpx,
-                    400,
-                    fg,
-                    0.92,
-                    cw - 10.0 * d,
-                );
+                if let Some((label, width, height)) =
+                    self.text_surface(&row.title, lpx, 400, fg, cw - 10.0 * d)
+                {
+                    self.sprite(
+                        area,
+                        &label,
+                        cx - width as f32 / 2.0,
+                        iy + icon + 13.0 * d - height as f32 / 2.0,
+                        width as f32,
+                        height as f32,
+                        0.92,
+                    );
+                }
                 self.hits
                     .push(((cx - cw / 2.0, y0, cw, ch), HitKind::Cell(idx)));
             }
@@ -2526,16 +2501,16 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         WM_HOTKEY => {
-            if wp.0 as i32 == HOTKEY_APPS {
-                toggle_mode(Mode::Apps);
-            } else {
-                toggle();
-            }
+            crate::shortcuts::invoke(wp.0 as i32);
             LRESULT(0)
         }
         WM_APPS => {
             with_spot(|s| {
-                s.apps = apps::snapshot();
+                let apps = apps::snapshot();
+                if s.apps == apps {
+                    return;
+                }
+                s.apps = apps;
                 s.names = s.apps.iter().map(|a| a.name.clone()).collect();
                 s.rebuild_rows();
                 s.render();
@@ -2559,7 +2534,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         m if m == prefs::WM_PREFS => {
-            sync_launchpad_key(hwnd);
+            crate::shortcuts::sync();
             clipboard::set_enabled(prefs::get().clipboard_history);
             LRESULT(0)
         }

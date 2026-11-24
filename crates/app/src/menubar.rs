@@ -651,7 +651,7 @@ impl Bar {
     }
 
     fn check_fullscreen(&mut self) {
-        let full = crate::fullscreen::active();
+        let full = crate::fullscreen::on_window(self.popup.hwnd);
         if full != self.fullscreen {
             self.fullscreen = full;
             if full {
@@ -1716,8 +1716,11 @@ impl Bar {
                             prefs::tr("Window manager")
                         ),
                     ),
-                    a(808, &prefs::tr("Overview")).with_accel("Ctrl+↑"),
-                    a(809, &prefs::tr("Apps")).with_accel(crate::launchpad::shortcut_label()),
+                    a(808, &prefs::tr("Overview")).with_accel(
+                        &crate::shortcuts::active_label(azr_core::shortcuts::Command::Overview)
+                            .unwrap_or_default(),
+                    ),
+                    a(809, &prefs::tr("Apps")).with_accel(&crate::launchpad::shortcut_label()),
                     Item::separator(),
                     a(810, &prefs::tr("Azr Settings…")),
                     a(811, &prefs::tr("System Settings…")),
@@ -1730,8 +1733,11 @@ impl Bar {
                 a(102, &prefs::tr("Microsoft Store…")),
                 Item::separator(),
                 a(103, &prefs::tr("Azr Settings…")),
-                a(105, &prefs::tr("Apps")).with_accel(crate::launchpad::shortcut_label()),
-                a(106, &prefs::tr("Overview")).with_accel("Ctrl+↑"),
+                a(105, &prefs::tr("Apps")).with_accel(&crate::launchpad::shortcut_label()),
+                a(106, &prefs::tr("Overview")).with_accel(
+                    &crate::shortcuts::active_label(azr_core::shortcuts::Command::Overview)
+                        .unwrap_or_default(),
+                ),
                 a(108, &prefs::tr("Open Task Manager")),
                 a(104, &prefs::tr("Force Quit Azr")),
                 Item::separator(),

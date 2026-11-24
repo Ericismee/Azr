@@ -322,6 +322,15 @@ pub struct Menu {
     pop_at: Vector3,
 }
 
+impl Drop for Menu {
+    fn drop(&mut self) {
+        self.end_input();
+        unsafe {
+            let _ = DestroyWindow(self.popup.hwnd);
+        }
+    }
+}
+
 impl Menu {
     pub fn new(
         comp: &Compositor,

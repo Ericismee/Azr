@@ -301,6 +301,7 @@ pub struct Settings {
     pub notch_material: Material,
     pub notch_round: u8,
     pub autostart: bool,
+    pub dock_hide_delay: u8,
     pub dock_size: u8,
     pub dock_gap: u8,
     pub dock_zoom: u8,
@@ -356,6 +357,7 @@ pub struct Settings {
     pub main_display: u8,
     pub overview_alt_tab: bool,
     pub launchpad_key: u8,
+    pub shortcuts: [Option<crate::shortcuts::Chord>; 3],
     pub launchpad_icon: u8,
 }
 
@@ -381,6 +383,7 @@ impl Default for Settings {
             notch_material: Material::Black,
             notch_round: 60,
             autostart: false,
+            dock_hide_delay: 3,
             dock_size: 48,
             dock_gap: 8,
             dock_zoom: 184,
@@ -436,6 +439,7 @@ impl Default for Settings {
             main_display: 0,
             overview_alt_tab: false,
             launchpad_key: 0,
+            shortcuts: [None; 3],
             launchpad_icon: 0,
         }
     }
@@ -455,6 +459,9 @@ impl Settings {
             };
             let (k, v) = (k.trim(), v.trim());
             match k {
+                "shortcut_search" => s.shortcuts[0] = crate::shortcuts::Chord::parse(v),
+                "shortcut_launchpad" => s.shortcuts[1] = crate::shortcuts::Chord::parse(v),
+                "shortcut_overview" => s.shortcuts[2] = crate::shortcuts::Chord::parse(v),
                 "launchpad_key" => {
                     s.launchpad_key = v.parse::<u8>().ok().filter(|n| *n <= 2).unwrap_or(0);
                 }
@@ -543,6 +550,11 @@ impl Settings {
                         .parse::<i32>()
                         .map(|n| n.clamp(0, 100) as u8)
                         .unwrap_or(s.notch_round)
+                }
+                "dock_hide_delay" => {
+                    if let Ok(delay @ (3 | 5 | 10)) = v.parse() {
+                        s.dock_hide_delay = delay;
+                    }
                 }
                 "dock_size" => {
                     s.dock_size = v
@@ -907,6 +919,15 @@ impl Settings {
             "launchpad_key={}\nlaunchpad_icon={}\n",
             self.launchpad_key, self.launchpad_icon
         ));
+        for (name, shortcut) in ["shortcut_search", "shortcut_launchpad", "shortcut_overview"]
+            .into_iter()
+            .zip(self.shortcuts)
+        {
+            if let Some(shortcut) = shortcut {
+                text.push_str(&format!("{name}={}\n", shortcut.encode()));
+            }
+        }
+        text.push_str(&format!("dock_hide_delay={}\n", self.dock_hide_delay));
         text.push_str(&format!("main_display={}\n", self.main_display));
         text.push_str(&format!(
             "quick_power_actions={}\n",
@@ -1129,6 +1150,7 @@ menubar_style=glass
             notch_material: Material::Glass,
             notch_round: 10,
             autostart: true,
+            dock_hide_delay: 10,
             dock_size: 60,
             dock_gap: 10,
             dock_zoom: 200,
@@ -1157,6 +1179,8 @@ menubar_style=glass
 
     #[test]
     fn defaults_show_rail_visor_and_dock() {
+        assert_eq!(Settings::parse("dock=smart").dock_hide_delay, 3);
+        assert_eq!(Settings::parse("dock_hide_delay=8").dock_hide_delay, 3);
         let d = Settings::default();
         assert!(
             !d.takeover && d.menubar && d.notch_enabled && d.dock_enabled && d.notch.reserves()
@@ -1393,6 +1417,24 @@ pub fn dock_look(s: &Settings, system_dark: bool) -> Look {
 #[cfg(test)]
 mod launchpad_pref_tests {
     use super::*;
+
+    #[test]
+    fn custom_shortcuts_round_trip_without_changing_legacy_presets() {
+        use crate::shortcuts::{Chord, ALT, CTRL, SHIFT};
+        let settings = Settings {
+            launchpad_key: 2,
+            shortcuts: [
+                Chord::new(ALT, 0x20),
+                Chord::new(CTRL | SHIFT, b'L' as u16),
+                Chord::new(CTRL | ALT, b'O' as u16),
+            ],
+            ..Settings::default()
+        };
+        let restored = Settings::parse(&settings.serialize());
+        assert_eq!(restored.shortcuts, settings.shortcuts);
+        assert_eq!(restored.launchpad_key, 2);
+        assert_eq!(Settings::parse("launchpad_key=2").shortcuts, [None; 3]);
+    }
 
     #[test]
     fn overview_alt_tab_requires_explicit_opt_in() {

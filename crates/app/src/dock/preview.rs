@@ -242,7 +242,11 @@ impl Preview {
         let h = pad + rows as i32 * stride;
         let x = (cx - w / 2).clamp(left + 4, (right - w - 4).max(left + 4));
         let rect = (x, (bottom - h).max(top), w, h);
-        if self.is_visible() && self.windows == windows {
+        let previous = self.popup.rect;
+        if self.is_visible() && self.windows == windows && (previous.2, previous.3) == (w, h) {
+            if previous != rect {
+                self.popup.set_rect(rect.0, rect.1, w, h)?;
+            }
             return Ok(());
         }
         if self.popup.rect != rect {

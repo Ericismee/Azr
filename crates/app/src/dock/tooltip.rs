@@ -17,6 +17,14 @@ unsafe extern "system" fn proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT
     DefWindowProcW(h, m, w, l)
 }
 
+impl Drop for Tooltip {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyWindow(self.popup.hwnd);
+        }
+    }
+}
+
 pub struct Tooltip {
     popup: Popup,
     text: SpriteVisual,

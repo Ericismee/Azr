@@ -482,7 +482,7 @@ impl Hud {
     }
 
     fn show(&mut self, i: usize) {
-        if crate::fullscreen::active()
+        if crate::fullscreen::on_selected()
             || !ENABLED.load(Ordering::Relaxed)
             || Self::value_of(self.bars[i].kind).is_none()
         {
@@ -577,7 +577,7 @@ impl Hud {
     fn on_message(&mut self, m: u32, w: WPARAM, l: LPARAM) {
         match m {
             crate::fullscreen::WM_FULLSCREEN => {
-                if crate::fullscreen::active() {
+                if crate::fullscreen::on_selected() {
                     self.dragging = None;
                     for bar in &mut self.bars {
                         bar.shown = false;
@@ -585,7 +585,7 @@ impl Hud {
                     }
                 }
             }
-            WM_VOLUME | WM_BRIGHT if crate::fullscreen::active() => {}
+            WM_VOLUME | WM_BRIGHT if crate::fullscreen::on_selected() => {}
             WM_VOLUME => {
                 if ENABLED.load(Ordering::Relaxed) {
                     osd::hide_native();

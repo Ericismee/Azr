@@ -3,6 +3,7 @@ use crate::prefs::{self, Role, WM_PREFS};
 use azr_core::hud::slider;
 use azr_core::i18n::Lang;
 use azr_core::settings::{Behavior, Material, Theme};
+use azr_core::shortcuts::{Chord, Command as ShortcutCommand};
 use azr_platform::icons::Bitmap;
 use azr_platform::text::{measure, render, render_face, Style, ICON_FACE};
 use azr_platform::{log, sys};
@@ -152,6 +153,7 @@ fn frame_pixels(
 #[derive(Clone, Copy, Debug)]
 enum Action {
     EditText(u8),
+    CaptureShortcut(ShortcutCommand),
     NotchIdle(u8),
     LyricsCompact,
     NotchDownloads,
@@ -168,6 +170,7 @@ enum Action {
     Takeover,
     QuickPower,
     Dock(Behavior),
+    DockHideDelay(u8),
     Notch(Behavior),
     Theme(Theme),
     Lang(Lang),
@@ -317,6 +320,8 @@ struct Win {
     thumbs: HashMap<String, CompositionDrawingSurface>,
     edit: Option<u8>,
     edit_buf: String,
+    recording_shortcut: Option<ShortcutCommand>,
+    shortcut_error: Option<&'static str>,
     frame: Option<windows::UI::Composition::SpriteVisual>,
     frame_key: (i32, i32, bool),
 }
@@ -442,6 +447,8 @@ fn create(comp: &Compositor) -> windows_core::Result<()> {
         thumbs: HashMap::new(),
         edit: None,
         edit_buf: String::new(),
+        recording_shortcut: None,
+        shortcut_error: None,
         frame: None,
         frame_key: (0, 0, false),
     });
@@ -1532,6 +1539,54 @@ impl Win {
         total
     }
 
+    fn shortcut_row(&self, label: &'static str, command: ShortcutCommand) -> RowDef {
+        let value = if self.recording_shortcut == Some(command) {
+            prefs::tr("Press your shortcut…").to_owned()
+        } else {
+            crate::shortcuts::configured_label(command)
+        };
+        RowDef::Pick(prefs::tr(label), value, Action::CaptureShortcut(command))
+    }
+
+    fn shortcut_help_row(&self) -> Option<RowDef> {
+        let message = self.shortcut_error.or(self
+            .recording_shortcut
+            .map(|_| "Esc cancels · Backspace resets"));
+        message.map(|message| RowDef::Info(prefs::tr(message), ""))
+    }
+
+    fn stop_recording_shortcut(&mut self) {
+        crate::shortcuts::end_capture(self.popup.hwnd);
+        self.recording_shortcut = None;
+    }
+
+    fn finish_shortcut(&mut self, key: u16, mods: u8) {
+        let Some(command) = self.recording_shortcut else {
+            return;
+        };
+        if key == 0x1B && mods == 0 {
+            self.stop_recording_shortcut();
+            self.shortcut_error = None;
+        } else {
+            let changed = if key == 8 && mods == 0 {
+                crate::shortcuts::set(command, None)
+            } else if let Some(chord) = Chord::new(mods, key) {
+                crate::shortcuts::set(command, Some(chord))
+            } else {
+                self.shortcut_error = Some("Use Ctrl, Alt or Shift with another key");
+                self.render();
+                return;
+            };
+            if changed {
+                self.stop_recording_shortcut();
+                self.shortcut_error = None;
+            } else {
+                self.shortcut_error = Some("Shortcut is in use. Try another.");
+            }
+        }
+        self.render();
+    }
+
     fn page(&self, page: u8) -> Vec<(Option<&'static str>, Vec<RowDef>)> {
         let s = prefs::get();
         let behaviors = |dock: bool| -> Vec<(&'static str, Action)> {
@@ -1571,6 +1626,15 @@ impl Win {
                         if s.lang == Lang::Vi { 0 } else { 1 },
                     )],
                 ),
+                (Some(prefs::tr("Custom shortcuts")), {
+                    let mut rows = vec![
+                        self.shortcut_row("Quick Search", ShortcutCommand::Search),
+                        self.shortcut_row("Launchpad shortcut", ShortcutCommand::Launchpad),
+                        self.shortcut_row("Overview", ShortcutCommand::Overview),
+                    ];
+                    rows.extend(self.shortcut_help_row());
+                    rows
+                }),
                 (
                     Some(prefs::tr("System")),
                     vec![
@@ -1642,7 +1706,11 @@ impl Win {
                                 (prefs::tr("Windows key"), Action::LaunchpadKey(1)),
                                 ("Ctrl+Alt+L", Action::LaunchpadKey(2)),
                             ],
-                            s.launchpad_key as usize,
+                            if s.shortcuts[ShortcutCommand::Launchpad.index()].is_some() {
+                                usize::MAX
+                            } else {
+                                s.launchpad_key as usize
+                            },
                         ),
                         RowDef::Seg(
                             prefs::tr("Launchpad icon"),
@@ -1691,6 +1759,19 @@ impl Win {
                             prefs::tr("When to show Dock"),
                             behaviors(true),
                             beh_idx(s.dock),
+                        ),
+                        RowDef::Seg(
+                            prefs::tr("Dock hide delay (Smart mode)"),
+                            vec![
+                                (prefs::tr("3 seconds"), Action::DockHideDelay(3)),
+                                (prefs::tr("5 seconds"), Action::DockHideDelay(5)),
+                                (prefs::tr("10 seconds"), Action::DockHideDelay(10)),
+                            ],
+                            match s.dock_hide_delay {
+                                5 => 1,
+                                10 => 2,
+                                _ => 0,
+                            },
                         ),
                         RowDef::Seg(
                             prefs::tr("Minimize effect"),
@@ -2228,21 +2309,17 @@ impl Win {
                     )],
                 ),
             ],
-            _ => vec![(
-                None,
-                vec![
-                    RowDef::Info(
-                        prefs::tr("Open Quick Search"),
-                        crate::spotlight::shortcut_label()
-                            .unwrap_or_else(|| prefs::tr("Alt + Space is already in use")),
-                    ),
-                    RowDef::Toggle(
-                        prefs::tr("Clipboard history in Quick Search"),
-                        s.clipboard_history,
-                        Action::ClipHistory,
-                    ),
-                ],
-            )],
+            _ => vec![(None, {
+                let mut rows =
+                    vec![self.shortcut_row("Open Quick Search", ShortcutCommand::Search)];
+                rows.extend(self.shortcut_help_row());
+                rows.push(RowDef::Toggle(
+                    prefs::tr("Clipboard history in Quick Search"),
+                    s.clipboard_history,
+                    Action::ClipHistory,
+                ));
+                rows
+            })],
         }
     }
 
@@ -2901,6 +2978,20 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             with_win(|w| w.hover_side(None));
             LRESULT(0)
         }
+        crate::shortcuts::WM_CAPTURED => {
+            with_win(|w| w.finish_shortcut(wp.0 as u16, lp.0 as u8));
+            LRESULT(0)
+        }
+        WM_KILLFOCUS => {
+            with_win(|w| {
+                if w.recording_shortcut.is_some() {
+                    w.stop_recording_shortcut();
+                    w.shortcut_error = None;
+                    w.render();
+                }
+            });
+            DefWindowProcW(hwnd, msg, wp, lp)
+        }
         WM_CHAR => {
             let ch = wp.0 as u32;
             with_win(|w| {
@@ -3017,7 +3108,26 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     }
                 });
             }
+            if !matches!(act, Some(Action::CaptureShortcut(_))) {
+                with_win(|w| {
+                    if w.recording_shortcut.is_some() {
+                        w.stop_recording_shortcut();
+                        w.shortcut_error = None;
+                        w.render();
+                    }
+                });
+            }
             match act {
+                Some(Action::CaptureShortcut(command)) => {
+                    let _ = SetForegroundWindow(hwnd);
+                    let _ = SetFocus(Some(hwnd));
+                    with_win(|w| {
+                        w.recording_shortcut = Some(command);
+                        w.shortcut_error = None;
+                        crate::shortcuts::begin_capture(hwnd);
+                        w.render();
+                    });
+                }
                 Some(Action::EditText(f)) => {
                     with_win(|w| {
                         if w.edit != Some(f) {
@@ -3048,7 +3158,13 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Action::LyricsOnline) => prefs::update(|s| s.lyrics_online = !s.lyrics_online),
 
                 Some(Action::MenuLogoPick) => choose_logo(hwnd, false),
-                Some(Action::LaunchpadKey(key)) => prefs::update(|s| s.launchpad_key = key),
+                Some(Action::LaunchpadKey(key)) => {
+                    let bound = crate::shortcuts::set_launchpad_preset(key);
+                    with_win(|w| {
+                        w.shortcut_error = (!bound).then_some("Shortcut is in use. Try another.");
+                        w.render();
+                    });
+                }
                 Some(Action::LaunchpadIcon(icon)) => {
                     if icon == 4 || (icon == 3 && crate::menulogo::launcher_path().is_none()) {
                         choose_logo(hwnd, true);
@@ -3140,6 +3256,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 Some(Action::Takeover) => prefs::update(|s| s.takeover = !s.takeover),
                 Some(Action::Dock(b)) => prefs::update(|s| s.dock = b),
+                Some(Action::DockHideDelay(delay)) => prefs::update(|s| {
+                    s.dock_hide_delay = delay;
+                    s.dock = Behavior::Smart;
+                }),
                 Some(Action::Notch(b)) => prefs::update(|s| s.notch = b),
                 Some(Action::Theme(t)) => prefs::update(|s| s.theme = t),
                 Some(Action::Lang(l)) => prefs::update(|s| s.lang = l),
@@ -3237,6 +3357,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             LRESULT(0)
         }
         WM_CLOSE_SELF => {
+            crate::shortcuts::end_capture(hwnd);
             prefs::unlisten(hwnd);
             let win = WIN.with(|s| s.borrow_mut().take());
             drop(win);

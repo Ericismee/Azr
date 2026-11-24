@@ -22,6 +22,7 @@ mod power;
 mod prefs;
 mod services;
 mod settings_win;
+mod shortcuts;
 mod single_instance;
 mod spotlight;
 mod stage;
@@ -151,7 +152,7 @@ fn main() {
     }
     log::init(paths::log());
 
-    let (mutex, event) = match single_instance::acquire() {
+    let (mutex, event) = match single_instance::acquire(args.open_settings) {
         single_instance::Role::Secondary => return,
         single_instance::Role::Primary(m, e) => (m, e),
     };
@@ -310,6 +311,10 @@ fn main() {
     unsafe {
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            if msg.hwnd == main_hwnd && msg.message == single_instance::WM_OPEN_SETTINGS {
+                settings_win::open(&host.compositor);
+                continue;
+            }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

@@ -8,7 +8,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
-pub const WM_WAKE: u32 = 0x8000 + 2;
+pub const WM_OPEN_SETTINGS: u32 = 0x8000 + 2;
 
 pub enum Role {
     Primary(HANDLE, HANDLE),
@@ -29,7 +29,7 @@ fn suffix() -> String {
     }
 }
 
-pub fn acquire() -> Role {
+pub fn acquire(open_settings: bool) -> Role {
     unsafe {
         let sfx = suffix();
         let mutex_name =
@@ -38,9 +38,11 @@ pub fn acquire() -> Role {
         let mutex = CreateMutexW(None, true, &mutex_name);
         let already = GetLastError() == ERROR_ALREADY_EXISTS;
         if already || mutex.is_err() {
-            if let Ok(ev) = OpenEventW(EVENT_MODIFY_STATE, false, &wake_name) {
-                let _ = SetEvent(ev);
-                let _ = CloseHandle(ev);
+            if open_settings {
+                if let Ok(ev) = OpenEventW(EVENT_MODIFY_STATE, false, &wake_name) {
+                    let _ = SetEvent(ev);
+                    let _ = CloseHandle(ev);
+                }
             }
             if let Ok(m) = mutex {
                 let _ = CloseHandle(m);
@@ -63,7 +65,12 @@ pub fn listen(event: HANDLE, main_hwnd: HWND) {
             return;
         }
         unsafe {
-            let _ = PostMessageW(Some(HWND(hw as *mut _)), WM_WAKE, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(
+                Some(HWND(hw as *mut _)),
+                WM_OPEN_SETTINGS,
+                WPARAM(0),
+                LPARAM(0),
+            );
         }
     });
 }

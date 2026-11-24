@@ -23,3 +23,5 @@ pub mod symbols;
 pub mod trash;
 pub mod visibility;
 pub mod widgets;
+
+pub mod shortcuts;

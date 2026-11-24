@@ -43,9 +43,16 @@ fn pxy(lp: LPARAM) -> (f32, f32) {
 const WM_RADIO: u32 = WM_APP + 131;
 const BTN_DISC: u8 = 20;
 const WM_MEDIA: u32 = WM_APP + 132;
+const WM_PRIVACY: u32 = WM_APP + 134;
 const WM_VALUES: u32 = WM_APP + 133;
 
 type Rect = (f32, f32, f32, f32);
+
+fn gallery_card_rect(rect: Rect, gh: f32, dpi: f32) -> Option<Rect> {
+    let top = rect.1.max(0.0);
+    let bottom = (rect.1 + rect.3).min(gh - 60.0 * dpi);
+    (bottom > top).then_some((rect.0, top, rect.2, bottom - top))
+}
 
 fn r_sep_visible(cy: f32, gh: f32, dpi: f32) -> bool {
     cy > 0.0 && cy < gh - 60.0 * dpi
@@ -157,6 +164,8 @@ struct Cc {
     edit: bool,
     panel: Option<Panel>,
     gallery: Option<Gallery>,
+    privacy: Vec<azr_platform::privacy::InUse>,
+    privacy_rx: Option<std::sync::mpsc::Receiver<Vec<azr_platform::privacy::InUse>>>,
     radios: Option<radio::Radios>,
     wifi: Option<bool>,
     bt: Option<bool>,
@@ -227,6 +236,8 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
                 edit: false,
                 panel: None,
                 gallery: None,
+                privacy: Vec::new(),
+                privacy_rx: None,
                 radios: None,
                 wifi: None,
                 bt: None,
@@ -249,7 +260,7 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
 }
 
 pub fn toggle(top: i32) {
-    if crate::fullscreen::active() {
+    if crate::fullscreen::on_pointer() {
         return;
     }
     let open = with(|c| c.panel.is_some() && !c.closing).unwrap_or(false);
@@ -265,6 +276,17 @@ pub fn toggle(top: i32) {
 
 pub fn is_open() -> bool {
     with(|c| c.panel.is_some() && !c.closing).unwrap_or(false)
+}
+
+pub fn close_for_fullscreen() {
+    with(|c| {
+        if c.panel
+            .as_ref()
+            .is_some_and(|p| crate::fullscreen::on_window(p.popup.hwnd))
+        {
+            c.close();
+        }
+    });
 }
 
 pub fn close() {
@@ -328,6 +350,7 @@ impl Cc {
     }
 
     fn open(&mut self, top: i32) {
+        let started = std::time::Instant::now();
         self.work = pointer_work_area();
         self.top = top.max(0);
         self.edit = false;
@@ -356,6 +379,53 @@ impl Cc {
             p.popup.show();
         }
         self.start_intro();
+        if self.panel.is_some() && std::env::var_os("AZR_UI_TIMINGS").is_some() {
+            azr_platform::log::line(
+                "ui-timing",
+                &format!(
+                    "quick-panel ready_ms={:.1}",
+                    started.elapsed().as_secs_f64() * 1000.0
+                ),
+            );
+        }
+        self.refresh_privacy();
+    }
+
+    fn refresh_privacy(&mut self) {
+        if self.privacy_rx.is_some() {
+            return;
+        }
+        let ctl = self.ctl.0 as isize;
+        let (tx, rx) = std::sync::mpsc::channel();
+        if std::thread::Builder::new()
+            .name("Azr-panel-privacy".into())
+            .spawn(move || {
+                let start = std::time::Instant::now();
+                let active = azr_platform::privacy::active();
+                if std::env::var_os("AZR_UI_TIMINGS").is_some() {
+                    azr_platform::log::line(
+                        "ui-timing",
+                        &format!(
+                            "quick-panel privacy_worker_ms={:.1}",
+                            start.elapsed().as_secs_f64() * 1000.0
+                        ),
+                    );
+                }
+                if tx.send(active).is_ok() {
+                    unsafe {
+                        let _ = PostMessageW(
+                            Some(HWND(ctl as *mut _)),
+                            WM_PRIVACY,
+                            WPARAM(0),
+                            LPARAM(0),
+                        );
+                    }
+                }
+            })
+            .is_ok()
+        {
+            self.privacy_rx = Some(rx);
+        }
     }
 
     fn start_intro(&mut self) {
@@ -742,7 +812,7 @@ impl Cc {
         let inuse = if self.edit {
             Vec::new()
         } else {
-            azr_platform::privacy::active()
+            self.privacy.clone()
         };
         let top = if inuse.is_empty() { 0.0 } else { 36.0 * dpi };
         let (pw, ph) = (gw, top + gh + 14.0 * dpi + btn_h + 4.0 * dpi);
@@ -2474,6 +2544,15 @@ impl Cc {
             cats.push((c, r));
             y += 38.0 * dpi;
         }
+        let Ok(viewport) = self.comp.CreateContainerVisual() else {
+            return;
+        };
+        let _ = viewport.SetSize(Vector2 { X: gw, Y: gh });
+        if let Ok(clip) = self.comp.CreateInsetClip() {
+            let _ = clip.SetBottomInset(60.0 * dpi);
+            let _ = viewport.SetClip(&clip);
+        }
+        let _ = content.Children().and_then(|k| k.InsertAtTop(&viewport));
         let mut cards = Vec::new();
         let list: Vec<Kind> = controls::ALL
             .iter()
@@ -2494,7 +2573,7 @@ impl Cc {
             }
             if cy + 24.0 * dpi > 0.0 && cy < gh - 60.0 * dpi {
                 self.text(
-                    &content,
+                    &viewport,
                     prefs::tr(c.title()),
                     (13.0 * dpi) as i32,
                     600,
@@ -2514,15 +2593,15 @@ impl Cc {
                     cw,
                     ch,
                 );
-                if r.1 + r.3 < 0.0 || r.1 > gh - 60.0 * dpi {
+                let Some(hit_rect) = gallery_card_rect(r, gh, dpi) else {
                     continue;
-                }
+                };
                 let present = self.layout.contains(k);
                 let Ok(card) = self.comp.CreateContainerVisual() else {
                     continue;
                 };
-                let _ = content.Children().and_then(|k| k.InsertAtTop(&card));
-                conts.push((r, card.clone(), 1.06));
+                let _ = viewport.Children().and_then(|k| k.InsertAtTop(&card));
+                conts.push((hit_rect, card.clone(), 1.06));
                 let content = card;
                 let _ = self.rrect(
                     &content,
@@ -2572,12 +2651,12 @@ impl Cc {
                     r.2 - 20.0 * dpi,
                     if present { 0.5 } else { 1.0 },
                 );
-                cards.push((*k, r));
+                cards.push((*k, hit_rect));
             }
             cy += ks.len().div_ceil(3) as f32 * (ch + cg);
             if r_sep_visible(cy, gh, dpi) {
                 let _ = self.rrect(
-                    &content,
+                    &viewport,
                     (cx0, cy - cg / 2.0, 3.0 * cw + 2.0 * cg, 1.0),
                     0.5,
                     Color {
@@ -2777,17 +2856,35 @@ fn raindrop(comp: &Compositor, thumb: &[SpriteVisual], active: bool) {
 
 unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
-        WM_RADIO => {
+        WM_PRIVACY => {
             with(|c| {
-                if let Some(r) = &c.radios {
-                    while let Ok(s) = r.snapshots.try_recv() {
-                        c.wifi = s.wifi;
-                        c.bt = s.bluetooth;
-                        c.ssid = s.ssid;
+                let Some(active) = c.privacy_rx.take().and_then(|rx| rx.try_recv().ok()) else {
+                    return;
+                };
+                if active != c.privacy {
+                    c.privacy = active;
+                    if c.panel.is_some() && !c.edit && !c.closing {
+                        c.build();
                     }
                 }
-                if c.panel.is_some() && !c.edit {
-                    c.build();
+            });
+            LRESULT(0)
+        }
+        WM_RADIO => {
+            with(|c| {
+                let latest = c
+                    .radios
+                    .as_ref()
+                    .and_then(|radio| radio.snapshots.try_iter().last());
+                if let Some(s) = latest {
+                    let changed =
+                        (c.wifi, c.bt, c.ssid.as_ref()) != (s.wifi, s.bluetooth, s.ssid.as_ref());
+                    c.wifi = s.wifi;
+                    c.bt = s.bluetooth;
+                    c.ssid = s.ssid;
+                    if changed && c.panel.is_some() && !c.edit && !c.closing {
+                        c.build();
+                    }
                 }
             });
             LRESULT(0)
@@ -3131,6 +3228,19 @@ unsafe extern "system" fn gallery_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
 mod placement_tests {
     use super::{gallery_rect, panel_scale};
     use windows::Win32::Foundation::RECT;
+
+    #[test]
+    fn gallery_card_hit_region_stops_at_the_footer() {
+        use super::gallery_card_rect;
+        assert_eq!(
+            gallery_card_rect((226.0, 470.0, 130.0, 112.0), 560.0, 1.0),
+            Some((226.0, 470.0, 130.0, 30.0))
+        );
+        assert_eq!(
+            gallery_card_rect((226.0, 500.0, 130.0, 112.0), 560.0, 1.0),
+            None
+        );
+    }
 
     #[test]
     fn tall_panel_scales_to_portrait_work_area() {

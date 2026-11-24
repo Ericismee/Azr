@@ -83,12 +83,8 @@ pub fn shutdown() {
     TAP.set(WinTap::default());
 }
 
-pub fn shortcut_label() -> &'static str {
-    match crate::prefs::get().launchpad_key {
-        1 => crate::prefs::tr("Windows key"),
-        2 => "Ctrl+Alt+L",
-        _ => "Ctrl+Shift+Space",
-    }
+pub fn shortcut_label() -> String {
+    crate::shortcuts::active_label(azr_core::shortcuts::Command::Launchpad).unwrap_or_default()
 }
 
 pub fn toggle() {
