@@ -461,7 +461,10 @@ impl Mgr {
         if text.trim() == DEFAULT_LAYOUT {
             self.default_layout = true;
             self.spawn_default_layout();
-            log::line("widgets", &format!("Loaded {} default widgets", self.list.len()));
+            log::line(
+                "widgets",
+                &format!("Loaded {} default widgets", self.list.len()),
+            );
             return;
         }
         let placed = widgets::from_text(&text);

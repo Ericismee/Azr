@@ -5,7 +5,8 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -103,6 +104,24 @@ pub fn add_tray(hwnd: HWND) {
     unsafe {
         let _ = Shell_NotifyIconW(NIM_ADD, &nid);
     }
+}
+
+pub fn notify_update(version: &str) -> bool {
+    let handle = MAIN_WINDOW.load(Ordering::Relaxed);
+    if handle == 0 {
+        return false;
+    }
+    let mut nid = tray_data(HWND(handle as *mut _));
+    nid.uFlags = NIF_INFO;
+    nid.dwInfoFlags = NIIF_INFO;
+    for (slot, c) in nid.szInfoTitle.iter_mut().zip("Azr".encode_utf16()) {
+        *slot = c;
+    }
+    let message = format!("{} ({version})", crate::prefs::tr("An update is available"));
+    for (slot, c) in nid.szInfo.iter_mut().zip(message.encode_utf16()) {
+        *slot = c;
+    }
+    unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid).as_bool() }
 }
 
 fn remove_tray(hwnd: HWND) {

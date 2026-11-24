@@ -163,7 +163,8 @@ enum Action {
     Close,
     Minimize,
     ProjectRepo,
-    ProjectReleases,
+    CheckUpdates,
+    InstallUpdate,
     ProjectCommunity,
     ProjectSupport,
     MainDisplay(u8),
@@ -284,6 +285,37 @@ fn row_label(r: &RowDef) -> &'static str {
         | RowDef::Text(l, ..) => l,
         RowDef::Radios(..) => "",
     }
+}
+
+fn update_row() -> RowDef {
+    use crate::updates::{self, Status};
+    let status = updates::status();
+    let (title, subtitle) = match &status {
+        Status::Available(update) | Status::InstallFailed(update) => {
+            let title = if updates::install_dir().is_none() {
+                "Download update"
+            } else if matches!(status, Status::InstallFailed(_)) {
+                "Retry update"
+            } else {
+                "Install update"
+            };
+            return RowDef::Pick(prefs::tr(title), update.tag.clone(), Action::InstallUpdate);
+        }
+        Status::Idle => ("Check for updates", "Look for a newer version on GitHub"),
+        Status::Checking => ("Checking for updates…", ""),
+        Status::Current => ("Check for updates", "Azr is up to date"),
+        Status::Installing => ("Downloading update…", "Azr will reopen after setup"),
+        Status::CheckFailed => (
+            "Check for updates",
+            "Could not check for updates. Try again.",
+        ),
+    };
+    RowDef::ProjectLink(
+        prefs::tr(title),
+        prefs::tr(subtitle),
+        "\u{E895}",
+        Action::CheckUpdates,
+    )
 }
 
 fn user_name() -> String {
@@ -2275,7 +2307,7 @@ impl Win {
                 ],
             )],
             9 => vec![
-                (None, vec![RowDef::Brand]),
+                (None, vec![RowDef::Brand, update_row()]),
                 (
                     Some("GitHub"),
                     vec![
@@ -2284,12 +2316,6 @@ impl Win {
                             prefs::tr("Ericismee/Azr · Star the project if you enjoy Azr"),
                             "\u{E734}",
                             Action::ProjectRepo,
-                        ),
-                        RowDef::ProjectLink(
-                            prefs::tr("View releases"),
-                            prefs::tr("See what's new and download updates"),
-                            "\u{E896}",
-                            Action::ProjectReleases,
                         ),
                         RowDef::ProjectLink(
                             prefs::tr("Share your desktop"),
@@ -2501,12 +2527,40 @@ impl Win {
                 13.0,
                 [255, 255, 255],
             );
+            let update_badge = idx == 9
+                && matches!(
+                    crate::updates::status(),
+                    crate::updates::Status::Available(_) | crate::updates::Status::InstallFailed(_)
+                );
+            if update_badge {
+                let bx = rx + rw - 20.0 * d;
+                self.rect(
+                    c,
+                    bx,
+                    sy + 11.0 * d,
+                    14.0 * d,
+                    14.0 * d,
+                    7.0 * d,
+                    col([255, 204, 51], 255),
+                );
+                self.text(
+                    c,
+                    "!",
+                    bx + 7.0 * d,
+                    sy + 11.0 * d,
+                    10.0,
+                    700,
+                    [41, 31, 10],
+                    1.0,
+                    1,
+                );
+            }
             self.text_fit(
                 c,
                 prefs::tr(name),
                 rx + 42.0 * d,
                 sy + (rh - 17.0 * d) / 2.0,
-                rw - 50.0 * d,
+                rw - if update_badge { 68.0 * d } else { 50.0 * d },
                 13.0,
                 if sel { 600 } else { 400 },
                 if sel { [255, 255, 255] } else { look.fg },
@@ -3236,9 +3290,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Action::ProjectRepo) => {
                     azr_platform::launch::open("https://github.com/Ericismee/Azr")
                 }
-                Some(Action::ProjectReleases) => {
-                    azr_platform::launch::open("https://github.com/Ericismee/Azr/releases/latest")
-                }
+                Some(Action::CheckUpdates) => crate::updates::check(),
+                Some(Action::InstallUpdate) => crate::updates::install(),
                 Some(Action::ProjectCommunity) => {
                     azr_platform::launch::open("https://github.com/Ericismee/Azr/discussions/3")
                 }
@@ -3342,6 +3395,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 _ => {}
             }
+            LRESULT(0)
+        }
+        crate::updates::WM_STATUS => {
+            with_win(|w| w.render());
             LRESULT(0)
         }
         WM_PREFS => {

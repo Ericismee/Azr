@@ -33,6 +33,7 @@ pub mod startup;
 pub mod sys;
 pub mod text;
 pub mod time;
+pub mod updates;
 pub mod vdesk;
 pub mod wic;
 pub mod wifi;

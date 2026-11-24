@@ -4,7 +4,7 @@
   #error PayloadDir must point to the binary-only staging folder.
 #endif
 
-#define AzrVersion "0.1.7"
+#define AzrVersion "0.1.8"
 #ifdef Windows10Preview
   #define AzrMinVersion "10.0.19045"
   #define AzrSetupName "Azr-Setup-Windows10-x64"
@@ -65,3 +65,20 @@ Name: "{autodesktop}\Azr"; Filename: "{app}\azr.exe"; Parameters: "--open-settin
 
 [Run]
 Filename: "{app}\azr.exe"; Description: "Open Azr"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\azr.exe"; WorkingDir: "{app}"; Flags: nowait skipifnotsilent; Check: IsAzrUpdate
+
+[Code]
+function IsAzrUpdate: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    if CompareText(ParamStr(I), '/AZRUPDATE') = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;

@@ -29,6 +29,7 @@ mod stage;
 mod strip;
 mod switcher;
 mod topmost;
+mod updates;
 mod widgets;
 
 use azr_core::visibility::policy::Mode;
@@ -307,6 +308,7 @@ fn main() {
     {
         mainwin::set_taskbar_hidden(true);
     }
+    updates::schedule_check();
 
     unsafe {
         let mut msg = MSG::default();
