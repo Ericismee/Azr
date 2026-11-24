@@ -46,6 +46,9 @@ DisableWelcomePage=no
 CloseApplications=yes
 RestartApplications=no
 
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
 [Tasks]
 Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
 

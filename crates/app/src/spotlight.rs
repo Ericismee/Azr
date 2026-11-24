@@ -375,8 +375,16 @@ pub fn toggle() {
 }
 
 pub fn toggle_mode(mode: Mode) {
+    toggle_mode_with_fullscreen(mode, false);
+}
+
+pub fn toggle_launchpad_from_windows_key() {
+    toggle_mode_with_fullscreen(Mode::Apps, true);
+}
+
+fn toggle_mode_with_fullscreen(mode: Mode, allow_fullscreen: bool) {
     let started = std::time::Instant::now();
-    if crate::fullscreen::on_pointer() {
+    if crate::fullscreen::on_pointer() && !allow_fullscreen {
         return;
     }
     let open_mode = SPOT.with(|c| c.borrow().as_ref().map(|s| s.mode));
@@ -2497,7 +2505,7 @@ fn perform(r: Run) {
 unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         crate::launchpad::WM_WINDOWS_TAP => {
-            toggle_mode(Mode::Apps);
+            toggle_launchpad_from_windows_key();
             LRESULT(0)
         }
         WM_HOTKEY => {

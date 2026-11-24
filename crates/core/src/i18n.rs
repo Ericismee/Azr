@@ -17,7 +17,7 @@ impl Lang {
             Lang::En => "en",
         }
     }
-    pub const ALL: [Lang; 2] = [Lang::Vi, Lang::En];
+    pub const ALL: [Lang; 2] = [Lang::En, Lang::Vi];
 }
 
 const VI: &[(&str, &str)] = &[

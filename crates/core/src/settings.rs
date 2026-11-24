@@ -372,7 +372,7 @@ impl Default for Settings {
             style: BlurStyle::Clear,
             transparency: 50,
             theme: Theme::Auto,
-            lang: Lang::Vi,
+            lang: Lang::En,
             dock_material: Material::Glass,
             dock_surface: 0,
             dock_opacity: 32,

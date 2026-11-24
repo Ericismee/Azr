@@ -1,10 +1,12 @@
 use azr_core::dock::layout::{layout, Metrics, Slot};
+use azr_core::i18n::Lang;
 use azr_core::settings::{Behavior, Settings, Theme};
 use azr_core::widgets::{self, Kind};
 
 #[test]
 fn fresh_settings_match_the_desktop_preset_without_changing_legacy_defaults() {
     let fresh = Settings::first_launch();
+    assert_eq!(fresh.lang, Lang::En);
     assert_eq!(fresh.theme, Theme::Dark);
     assert_eq!(fresh.dock, Behavior::Smart);
     assert_eq!(

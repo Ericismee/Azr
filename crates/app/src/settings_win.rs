@@ -1808,10 +1808,10 @@ impl Win {
                     vec![RowDef::Segments(
                         prefs::tr("Language"),
                         vec![
-                            ("Tiếng Việt", Action::Lang(Lang::Vi)),
                             ("English", Action::Lang(Lang::En)),
+                            ("Tiếng Việt", Action::Lang(Lang::Vi)),
                         ],
-                        if s.lang == Lang::Vi { 0 } else { 1 },
+                        if s.lang == Lang::En { 0 } else { 1 },
                     )],
                 ),
                 (

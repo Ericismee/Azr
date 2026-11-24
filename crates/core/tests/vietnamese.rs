@@ -4,9 +4,10 @@ use azr_core::{
 };
 
 #[test]
-fn vietnamese_is_default_and_indonesian_is_removed() {
+fn vietnamese_translation_remains_available_and_english_is_default() {
     let vi = Lang::parse("vi").expect("Vietnamese locale");
-    assert_eq!(Settings::default().lang, vi);
+    assert_eq!(Settings::default().lang, Lang::En);
+    assert_eq!(Lang::ALL[0], Lang::En);
     assert_eq!(vi.key(), "vi");
     assert_eq!(Lang::parse("id"), None);
     assert_eq!(i18n::tr(vi, "Settings"), "Cài đặt");
