@@ -37,6 +37,7 @@ const CMD_REMOVE: usize = 2;
 const MARGIN: f32 = 26.0;
 const RADIUS: f32 = 32.0;
 const PREVIEW: f32 = 0.6;
+const DEFAULT_LAYOUT: &str = "# Azr default widget layout";
 const RED: [u8; 3] = [255, 59, 48];
 const ORANGE: [u8; 3] = [255, 149, 0];
 const GREEN: [u8; 3] = [52, 199, 89];
@@ -117,6 +118,7 @@ struct Mgr {
     display_size: (i32, i32),
     appearance: WidgetAppearance,
     list: Vec<Widget>,
+    default_layout: bool,
     control_center_area: Option<RECT>,
     cache: HashMap<String, (CompositionDrawingSurface, i32, i32)>,
     edit: bool,
@@ -246,16 +248,7 @@ fn utc_minutes() -> i32 {
 
 fn area(dpi: f32) -> widgets::Rect {
     let display = crate::display::selected();
-    let (sw, sh) = display.size();
-    let (x, y) = display.origin();
-    let top = (44.0 * dpi) as i32;
-    let side = (20.0 * dpi) as i32;
-    (
-        x + side,
-        y + top,
-        sw - 2 * side,
-        sh - top - (120.0 * dpi) as i32,
-    )
+    widgets::desktop_area(display.origin(), display.size(), dpi)
 }
 
 fn style() -> u8 {
@@ -300,7 +293,7 @@ fn palette(kind: Kind) -> (Option<Color>, [u8; 3]) {
     }
 }
 
-pub fn init(comp: &Compositor) -> windows_core::Result<()> {
+pub fn init(comp: &Compositor, first_launch: bool) -> windows_core::Result<()> {
     unsafe {
         let hi: HINSTANCE = GetModuleHandleW(None)?.into();
         let class = w!("AzrWidgetsCtl");
@@ -325,7 +318,7 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
             None,
         )?;
         let display = crate::display::selected();
-        let dpi = display.dpi();
+        let dpi = widgets::fit_dpi(display.size(), display.dpi());
         MGR.with(|c| {
             *c.borrow_mut() = Some(Mgr {
                 ctl,
@@ -336,6 +329,7 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
                 display_size: display.size(),
                 appearance: WidgetAppearance::current(),
                 list: Vec::new(),
+                default_layout: false,
                 control_center_area: None,
                 cache: HashMap::new(),
                 edit: false,
@@ -356,7 +350,7 @@ pub fn init(comp: &Compositor) -> windows_core::Result<()> {
         prefs::listen(ctl);
         SetTimer(Some(ctl), T_TICK, 1000, None);
     }
-    with(|m| m.load());
+    with(|m| m.load(first_launch));
     Ok(())
 }
 
@@ -454,8 +448,23 @@ impl Mgr {
         self.slot_kind(skip, kind, pos)
     }
 
-    fn load(&mut self) {
-        let placed = widgets::from_text(&std::fs::read_to_string(list_file()).unwrap_or_default());
+    fn load(&mut self, first_launch: bool) {
+        let text = match std::fs::read_to_string(list_file()) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && first_launch => {
+                let _ = std::fs::create_dir_all(paths::config_dir());
+                let _ = std::fs::write(list_file(), DEFAULT_LAYOUT);
+                DEFAULT_LAYOUT.to_owned()
+            }
+            Err(_) => String::new(),
+        };
+        if text.trim() == DEFAULT_LAYOUT {
+            self.default_layout = true;
+            self.spawn_default_layout();
+            log::line("widgets", &format!("Loaded {} default widgets", self.list.len()));
+            return;
+        }
+        let placed = widgets::from_text(&text);
         let mut moved = false;
         for p in placed {
             let at = self.slot_kind(None, p.kind, (p.x, p.y));
@@ -468,7 +477,13 @@ impl Mgr {
         log::line("widgets", &format!("{} widget dimuat", self.list.len()));
     }
 
-    fn save(&self) {
+    fn spawn_default_layout(&mut self) {
+        for p in widgets::default_layout(area(self.dpi), self.dpi) {
+            self.spawn(p.kind, (p.x, p.y), false);
+        }
+    }
+
+    fn save(&mut self) {
         let list: Vec<Placed> = self
             .list
             .iter()
@@ -479,14 +494,16 @@ impl Mgr {
             })
             .collect();
         let _ = std::fs::create_dir_all(paths::config_dir());
-        let _ = std::fs::write(list_file(), widgets::to_text(&list));
+        if std::fs::write(list_file(), widgets::to_text(&list)).is_ok() {
+            self.default_layout = false;
+        }
     }
 
     fn rebuild_all(&mut self) -> bool {
         let display = crate::display::selected();
         let origin = display.origin();
-        let dpi = display.dpi();
         let size = display.size();
+        let dpi = widgets::fit_dpi(size, display.dpi());
         let appearance = WidgetAppearance::current();
         if origin == self.origin
             && dpi == self.dpi
@@ -495,6 +512,7 @@ impl Mgr {
         {
             return false;
         }
+        let moved = origin != self.origin || (dpi - self.dpi).abs() > 0.01;
         self.display_size = size;
         self.appearance = appearance;
         let delta = (origin.0 - self.origin.0, origin.1 - self.origin.1);
@@ -503,9 +521,8 @@ impl Mgr {
             .iter()
             .map(|w| (w.kind, (w.pos.0 + delta.0, w.pos.1 + delta.1)))
             .collect();
-        let moved = origin != self.origin || (display.dpi() - self.dpi).abs() > 0.01;
         self.origin = origin;
-        self.dpi = display.dpi();
+        self.dpi = dpi;
         self.menu = None;
         self.drag = None;
 
@@ -515,12 +532,16 @@ impl Mgr {
             }
         }
         self.cache.clear();
-        for (k, p) in placed {
-            let pos = self.slot_kind(None, k, p);
-            self.spawn(k, pos, false);
-        }
-        if moved {
-            self.save();
+        if self.default_layout {
+            self.spawn_default_layout();
+        } else {
+            for (k, p) in placed {
+                let pos = self.slot_kind(None, k, p);
+                self.spawn(k, pos, false);
+            }
+            if moved {
+                self.save();
+            }
         }
         true
     }
@@ -2124,7 +2145,7 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
 
 unsafe extern "system" fn widget_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
-        WM_DISPLAYCHANGE => {
+        WM_DISPLAYCHANGE | WM_DPICHANGED => {
             with(|m| {
                 let _ = PostMessageW(Some(m.ctl), prefs::WM_PREFS, WPARAM(0), LPARAM(0));
             });

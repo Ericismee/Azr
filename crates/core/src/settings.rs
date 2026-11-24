@@ -446,6 +446,36 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn first_launch() -> Self {
+        Self {
+            takeover: true,
+            notch: Behavior::Overlay,
+            theme: Theme::Dark,
+            lang: Lang::En,
+            dock_opacity: 19,
+            dock_blur: 15,
+            icon_background: 1,
+            dock_round: 41,
+            notch_material: Material::Glass,
+            notch_round: 59,
+            dock_size: 38,
+            dock_gap: 6,
+            dock_zoom: 124,
+            dock_margin: 5,
+            clock_24h: true,
+            menubar_material: false,
+            switcher: false,
+            stage_right: true,
+            stage_size: 111,
+            stage_gap: 11,
+            stage_media: true,
+            widget_style: 1,
+            overview_alt_tab: true,
+            launchpad_icon: 1,
+            ..Self::default()
+        }
+    }
+
     pub fn parse(text: &str) -> Settings {
         let mut s = Settings::default();
         let mut legacy_glass = false;

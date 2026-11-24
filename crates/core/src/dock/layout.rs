@@ -14,6 +14,21 @@ pub struct Metrics {
 }
 
 impl Metrics {
+    pub fn fit_width(self, slots: &[Slot], width: f32) -> Self {
+        let items = slots.iter().filter(|slot| **slot == Slot::Item).count();
+        let zoomed = ((2.0 * self.reach / (self.icon + self.gap)).floor() as usize + 1).min(items);
+        let full_width =
+            base_width(slots, &self) + zoomed as f32 * self.icon * (self.max_scale - 1.0);
+        let scale = (width / full_width).min(1.0);
+        Self {
+            icon: self.icon * scale,
+            gap: self.gap * scale,
+            reach: self.reach * scale,
+            separator: self.separator * scale,
+            ..self
+        }
+    }
+
     pub fn custom(icon: f32, gap: f32, zoom: f32, scale: f32) -> Self {
         Metrics {
             icon: icon * scale,

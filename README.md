@@ -1,5 +1,5 @@
 <div align="center">
-<img src="docs/assets/azr-liquid-glass-banner.jpg" alt="Azr Liquid Glass desktop customization for Windows 10 and 11">
+<img src="./assets/brand/azr-liquid-glass.png" width="144" alt="Azr Logo">
 <h1>Azr</h1>
 <p>Desktop customization for Windows 11.</p>
 

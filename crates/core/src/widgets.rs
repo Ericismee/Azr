@@ -150,6 +150,56 @@ pub fn from_text(t: &str) -> Vec<Placed> {
 
 pub type Rect = (i32, i32, i32, i32);
 
+const TOP_INSET: f32 = 44.0;
+const SIDE_INSET: f32 = 20.0;
+const BOTTOM_INSET: f32 = 120.0;
+
+pub fn fit_dpi((width, height): (i32, i32), dpi: f32) -> f32 {
+    let two_cells = 2.0 * CELL + GAP;
+    dpi.min((width.max(2) - 1) as f32 / (two_cells + 2.0 * SIDE_INSET))
+        .min((height.max(2) - 1) as f32 / (two_cells + TOP_INSET + BOTTOM_INSET))
+}
+
+pub fn desktop_area((x, y): (i32, i32), (width, height): (i32, i32), dpi: f32) -> Rect {
+    let top = (TOP_INSET * dpi) as i32;
+    let side = (SIDE_INSET * dpi) as i32;
+    (
+        x + side,
+        y + top,
+        width - 2 * side,
+        height - top - (BOTTOM_INSET * dpi) as i32,
+    )
+}
+
+pub fn default_layout(area: Rect, dpi: f32) -> [Placed; 4] {
+    let step = ((CELL + GAP) * dpi).round().max(1.0) as i32;
+    let last_col = ((area.2 - (CELL * dpi).ceil() as i32) / step).max(1);
+    let left = area.0 + (last_col - 1) * step;
+    let top = area.1;
+    [
+        Placed {
+            kind: Kind::Calendar,
+            x: left,
+            y: top,
+        },
+        Placed {
+            kind: Kind::Clock,
+            x: left + step,
+            y: top,
+        },
+        Placed {
+            kind: Kind::Battery,
+            x: left,
+            y: top + step,
+        },
+        Placed {
+            kind: Kind::System,
+            x: left + step,
+            y: top + step,
+        },
+    ]
+}
+
 fn overlaps(a: Rect, b: Rect, gap: i32) -> bool {
     a.0 < b.0 + b.2 + gap && b.0 < a.0 + a.2 + gap && a.1 < b.1 + b.3 + gap && b.1 < a.1 + a.3 + gap
 }

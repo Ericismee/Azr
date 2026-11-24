@@ -1677,7 +1677,7 @@ impl Cc {
     }
 
     fn art_at(&self, c: &ContainerVisual, x: f32, y: f32, art: f32, dpi: f32) {
-        let Some(a) = self.art.clone() else {
+        let Some(a) = self.art.as_ref() else {
             let _ = self.rrect(
                 c,
                 (x, y, art, art),
@@ -1695,7 +1695,7 @@ impl Cc {
         let go = || -> windows_core::Result<()> {
             let s = gfx.surface_from_bgra(a.w, a.h, &a.bgra)?;
             let b = self.comp.CreateSurfaceBrushWithSurface(&s)?;
-            b.SetStretch(CompositionStretch::UniformToFill)?;
+            b.SetStretch(CompositionStretch::Uniform)?;
             let v = self.comp.CreateSpriteVisual()?;
             v.SetBrush(&b)?;
             v.SetSize(Vector2 { X: art, Y: art })?;

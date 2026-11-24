@@ -1,5 +1,5 @@
 <div align="center">
-<img src="docs/assets/azr-liquid-glass-banner.jpg" alt="Giao diện Liquid Glass của Azr cho Windows 10 và 11">
+<img src="./assets/brand/azr-liquid-glass.png" width="144" alt="Logo Azr">
 <h1>Azr</h1>
 <p>Tùy biến giao diện Windows 11.</p>
 

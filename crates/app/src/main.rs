@@ -180,7 +180,7 @@ fn main() {
         );
     }
 
-    prefs::init();
+    let first_launch = prefs::init();
     let pref = prefs::get();
     let host = match azr_ui::host::Host::new() {
         Ok(h) => h,
@@ -274,7 +274,7 @@ fn main() {
     if let Err(e) = fx::init(&host) {
         log::line("fx", &format!("gagal: {e}"));
     }
-    if let Err(e) = widgets::init(&host.compositor) {
+    if let Err(e) = widgets::init(&host.compositor, first_launch) {
         log::line("widgets", &format!("gagal: {e}"));
     }
     azr_platform::sys::trim_later(20_000);

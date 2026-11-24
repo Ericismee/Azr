@@ -17,12 +17,18 @@ fn file() -> std::path::PathBuf {
     paths::config_dir().join("settings.cfg")
 }
 
-pub fn init() {
-    let s = std::fs::read_to_string(file())
-        .map(|t| Settings::parse(&t))
-        .unwrap_or_default();
+pub fn init() -> bool {
+    let (s, fresh) = match std::fs::read_to_string(file()) {
+        Ok(text) => (Settings::parse(&text), false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Settings::first_launch(), true),
+        Err(e) => {
+            log::line("prefs", &format!("Could not read settings: {e}"));
+            (Settings::default(), false)
+        }
+    };
     log::line("prefs", "Azr Hardened settings loaded");
     *CUR.lock().unwrap() = Some(s);
+    fresh
 }
 
 pub fn get() -> Settings {

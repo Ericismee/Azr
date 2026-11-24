@@ -559,7 +559,8 @@ impl Dock {
             }
         };
         let need = width + 2.0 * self.pad_side + 40.0 * self.dpi;
-        let w = (need.ceil() as i32).clamp(200, self.screen.0);
+        let screen_width = self.screen.0.max(1);
+        let w = (need.ceil() as i32).clamp(200.min(screen_width), screen_width);
         self.win.0 = w;
         self.win_pos = (
             self.origin.0 + (self.screen.0 - w) / 2,
@@ -645,7 +646,7 @@ impl Dock {
 
     fn apply_metrics(&mut self) {
         let s = crate::prefs::get();
-        let m = metrics_from_prefs(self.dpi);
+        let m = self.fitted_metrics();
         let same = (m.icon - self.m.icon).abs() < 0.01
             && (m.gap - self.m.gap).abs() < 0.01
             && (m.max_scale - self.m.max_scale).abs() < 0.001
@@ -679,6 +680,11 @@ impl Dock {
                 s.dock_size, s.dock_gap, s.dock_zoom, s.dock_margin
             ),
         );
+    }
+
+    fn fitted_metrics(&self) -> Metrics {
+        let available = (self.screen.0 as f32 - 2.0 * self.pad_side - 40.0 * self.dpi).max(1.0);
+        metrics_from_prefs(self.dpi).fit_width(&self.slots, available)
     }
 
     fn reserve_strip(&mut self) {
@@ -948,6 +954,8 @@ impl Dock {
                 Slot::Item
             });
         }
+        self.m = self.fitted_metrics();
+        self.compute_geometry();
 
         if let Ok(kids) = self.content.Children() {
             let _ = kids.RemoveAll();

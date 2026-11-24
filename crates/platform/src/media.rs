@@ -301,7 +301,7 @@ fn build(
                     ArtUpdate::Unchanged
                 } else {
                     art_state.hash = h;
-                    match crate::wic::decode_square(&bytes, 128) {
+                    match crate::wic::decode_artwork(&bytes, 128) {
                         Some(bmp) => ArtUpdate::New(bmp),
                         None if new_track => ArtUpdate::None,
                         None => ArtUpdate::Unchanged,
