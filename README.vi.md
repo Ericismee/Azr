@@ -28,22 +28,37 @@ Azr là ứng dụng tùy biến giao diện dành cho **Windows 11**, lấy c�
 
 ## Ảnh giao diện
 
-[![Màn hình nền Azr với hình nền xanh, Dock kính, Dynamic Island và widget](docs/assets/azr-desktop-blue.png)](docs/assets/azr-desktop-blue.png)
-
-*Bạn tùy biến Azr thế nào? [Chia sẻ ảnh desktop của bạn](https://github.com/Ericismee/Azr/discussions/3).*
-
 <details>
-<summary>Xem màn hình nền, bảng điều khiển kính và widget</summary>
+<summary>Nhấn để xem ảnh</summary>
 
-![Màn hình tiếng Anh](docs/assets/desktop-user-en.png)
-![Màn hình tiếng Việt](docs/assets/desktop-user-vi.png)
-![Bảng điều khiển kính](docs/assets/control-center-user.png)
-![Widget màn hình nền](docs/assets/widgets-user.png)
+<p align="center">
+<a href="docs/assets/settings-appearance.png"><img src="docs/assets/settings-appearance-preview.jpg" alt="Cài đặt giao diện Azr"></a>
+<br><em>Hình 1. Giao diện cài đặt Azr trên desktop.</em>
+</p>
+
+<p align="center">
+<a href="docs/assets/quick-controls.png"><img src="docs/assets/quick-controls-preview.jpg" alt="Bảng điều khiển nhanh"></a>
+<br><em>Hình 2. Bảng điều khiển nhanh của Azr.</em>
+</p>
+
+<p align="center">
+<a href="docs/assets/dynamic-island-media.png"><img src="docs/assets/dynamic-island-media-preview.jpg" alt="Dynamic Island"></a>
+<br><em>Hình 3. Dynamic Island trên desktop.</em>
+</p>
+
+<p align="center">
+<a href="docs/assets/launchpad.png"><img src="docs/assets/launchpad-preview.jpg" alt="Launchpad"></a>
+<br><em>Hình 4. Launchpad cùng các ứng dụng trên máy.</em>
+</p>
+
+<p align="center">
+<a href="docs/assets/quick-search.png"><img src="docs/assets/quick-search-preview.jpg" alt="Tìm kiếm nhanh"></a>
+<br><em>Hình 5. Màn hình Tìm kiếm nhanh của Azr.</em>
+</p>
 
 </details>
 
-Ảnh chụp trong Windows Sandbox, minh họa một số cấu hình giao diện. Hiệu ứng kính có thể khác nhau theo hình nền, thiết lập Windows, phần cứng và phiên làm việc từ xa.
-
+*Bạn tùy biến Azr thế nào? [Chia sẻ ảnh desktop của bạn](https://github.com/Ericismee/Azr/discussions/3).*
 ## Mức sử dụng tài nguyên
 
 ![Tiến trình Azr trong Task Manager](docs/assets/process-memory.png)

@@ -28,21 +28,37 @@ Azr is a desktop customization app for **Windows 11**, inspired by macOS. It add
 
 ## Screenshots
 
-[![Azr desktop with a blue wallpaper, glass Dock, Dynamic Island, and widgets](docs/assets/azr-desktop-blue.png)](docs/assets/azr-desktop-blue.png)
-
-*What does Azr look like on your desktop? [Share your setup](https://github.com/Ericismee/Azr/discussions/3).*
-
 <details>
-<summary>Explore the desktop, glass controls, and widgets</summary>
+<summary>Click to view screenshots</summary>
 
-![English desktop](docs/assets/desktop-user-en.png)
-![Glass control center](docs/assets/control-center-user.png)
-![Desktop widgets](docs/assets/widgets-user.png)
+<p align="center">
+<a href="docs/assets/settings-appearance.png"><img src="docs/assets/settings-appearance-preview.jpg" alt="Azr appearance settings"></a>
+<br><em>Figure 1. Azr settings on the desktop.</em>
+</p>
+
+<p align="center">
+<a href="docs/assets/quick-controls.png"><img src="docs/assets/quick-controls-preview.jpg" alt="Quick controls"></a>
+<br><em>Figure 2. Azr quick controls in use.</em>
+</p>
+
+<p align="center">
+<a href="docs/assets/dynamic-island-media.png"><img src="docs/assets/dynamic-island-media-preview.jpg" alt="Dynamic Island media controls"></a>
+<br><em>Figure 3. Dynamic Island on the desktop.</em>
+</p>
+
+<p align="center">
+<a href="docs/assets/launchpad.png"><img src="docs/assets/launchpad-preview.jpg" alt="Launchpad"></a>
+<br><em>Figure 4. Azr Launchpad with installed apps.</em>
+</p>
+
+<p align="center">
+<a href="docs/assets/quick-search.png"><img src="docs/assets/quick-search-preview.jpg" alt="Quick Search"></a>
+<br><em>Figure 5. Quick Search shown on the desktop.</em>
+</p>
 
 </details>
 
-Captured in Windows Sandbox, showing several appearance configurations. Glass effects may vary with wallpaper, Windows settings, hardware, and remote-session support.
-
+*What does Azr look like on your desktop? [Share your setup](https://github.com/Ericismee/Azr/discussions/3).*
 ## Resource usage
 
 ![Azr processes in Task Manager](docs/assets/process-memory.png)
