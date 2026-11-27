@@ -67,7 +67,6 @@ fn of_type(path: &str, t: Option<usize>) -> bool {
     let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     FTYPES[t].1.contains(&ext.as_str())
 }
-const GRID_ROWS: usize = 4;
 
 type Rect = (f32, f32, f32, f32);
 
@@ -128,7 +127,6 @@ struct Spot {
     query_selected: bool,
     rows: Vec<Row>,
     sel: usize,
-    scroll: usize,
     apps: Vec<App>,
     names: Vec<String>,
     cat: Option<Cat>,
@@ -532,7 +530,6 @@ fn create(comp: &Compositor, mode: Mode) -> windows_core::Result<Box<Spot>> {
         query_selected: false,
         rows: vec![],
         sel: 0,
-        scroll: 0,
         apps,
         names,
         cat: None,
@@ -706,7 +703,6 @@ impl Spot {
         self.request_files();
         self.query_selected = false;
         self.sel = 0;
-        self.scroll = 0;
         self.cat = None;
         self.filter = None;
         self.editing = None;
@@ -841,7 +837,7 @@ impl Spot {
         self.headers.clear();
         self.sections.clear();
         self.sel = 0;
-        self.scroll = 0;
+        self.pscroll = 0.0;
         let q = self.query.trim().to_string();
         match self.mode {
             Mode::Search => {
@@ -1085,10 +1081,10 @@ impl Spot {
             std::mem::take(&mut *self.shared_files.lock().unwrap_or_else(|e| e.into_inner()));
         if gen == self.files_gen && gen != 0 && matches!(self.mode, Mode::Search | Mode::Files) {
             self.files = hits;
-            let (sel, scroll) = (self.sel, self.scroll);
+            let (sel, ps) = (self.sel, self.pscroll);
             self.rebuild_rows();
             self.sel = sel.min(self.rows.len().saturating_sub(1));
-            self.scroll = scroll;
+            self.pscroll = ps;
             self.render();
         }
         self.start_file_query();
@@ -1787,7 +1783,7 @@ impl Spot {
         let empty_q = self.query.trim().is_empty();
         match self.mode {
             Mode::Apps if empty_q => self.draw_sections(&area, w, top, ph, fg, false),
-            Mode::Apps => self.draw_grid(&area, w, top, fg),
+            Mode::Apps => self.draw_grid(&area, w, top, ph, fg),
             Mode::Files if empty_q => self.draw_sections(&area, w, top, ph, fg, true),
             _ => self.draw_rows(&area, w, top, 54.0 * d, ph, fg),
         }
@@ -2017,13 +2013,13 @@ impl Spot {
         112.0 * self.dpi
     }
 
-    fn draw_grid(&mut self, content: &ContainerVisual, w: f32, top: f32, fg: [u8; 3]) {
+    fn draw_grid(&mut self, content: &ContainerVisual, w: f32, top: f32, ph: f32, fg: [u8; 3]) {
         let d = self.dpi;
         let (cw, ch) = ((w - 40.0 * d) / COLS as f32, self.cell_h());
         let icon = (cw * 0.5).min(72.0 * d);
-        let per = COLS * GRID_ROWS;
-        let start = self.scroll * COLS;
         let n = self.rows.len();
+        self.view = (top, ph);
+        self.cell_y.clear();
         if n == 0 {
             self.text(
                 content,
@@ -2036,79 +2032,90 @@ impl Spot {
                 0.6,
                 w,
             );
+            self.content_h = 0.0;
             return;
         }
-        for i in 0..per {
-            let idx = start + i;
-            if idx >= n {
-                break;
-            }
-            let (r, c) = (i / COLS, i % COLS);
-            let cx = 20.0 * d + c as f32 * cw + cw / 2.0;
-            let cy0 = top + 6.0 * d + r as f32 * ch;
-            let row = self.rows[idx].clone();
-            let sel_c;
-            let content = if idx == self.sel {
-                sel_c = self.sel_box(
+        let rows_n = n.div_ceil(COLS);
+        let max_scroll = (6.0 * d + rows_n as f32 * ch + 12.0 * d - (ph - top)).max(0.0);
+        self.pscroll = self.pscroll.clamp(0.0, max_scroll);
+        for r in 0..rows_n {
+            let cy0 = top + 6.0 * d + r as f32 * ch - self.pscroll;
+            let visible = cy0 + ch > top && cy0 < ph;
+            for c in 0..COLS {
+                let idx = r * COLS + c;
+                if idx >= n {
+                    break;
+                }
+                self.cell_y.push((idx, cy0 + self.pscroll, ch));
+                if !visible {
+                    continue;
+                }
+                let cx = 20.0 * d + c as f32 * cw + cw / 2.0;
+                let row = self.rows[idx].clone();
+                let sel_c;
+                let content = if idx == self.sel {
+                    sel_c = self.sel_box(
+                        content,
+                        &row,
+                        Vector3 {
+                            X: cx,
+                            Y: cy0 + ch / 2.0,
+                            Z: 0.0,
+                        },
+                        cw / 2.0,
+                        16.0 * d,
+                    );
+                    &sel_c
+                } else {
+                    content
+                };
+                if idx == self.sel {
+                    self.rect(
+                        content,
+                        (cx - cw / 2.0 + 4.0 * d, cy0, cw - 8.0 * d, ch - 4.0 * d),
+                        14.0 * d,
+                        Color {
+                            A: 26,
+                            R: fg[0],
+                            G: fg[1],
+                            B: fg[2],
+                        },
+                    );
+                }
+                if let Some(s) = self.icon_surface(&row.path, (icon * 1.6) as i32) {
+                    self.sprite(content, &s, cx - icon / 2.0, cy0 + 8.0 * d, icon, icon, 1.0);
+                } else {
+                    self.rect(
+                        content,
+                        (cx - icon / 2.0, cy0 + 8.0 * d, icon, icon),
+                        icon * 0.23,
+                        Color {
+                            A: 60,
+                            R: fg[0],
+                            G: fg[1],
+                            B: fg[2],
+                        },
+                    );
+                }
+                let lw = self
+                    .text_w(&row.title, (13.0 * d).round() as i32, 400)
+                    .min(cw - 10.0 * d);
+                self.text(
                     content,
-                    &row,
-                    Vector3 {
-                        X: cx,
-                        Y: cy0 + ch / 2.0,
-                        Z: 0.0,
-                    },
-                    cw / 2.0,
-                    16.0 * d,
+                    &row.title,
+                    cx - lw / 2.0,
+                    cy0 + 8.0 * d + icon + 14.0 * d,
+                    (13.0 * d).round() as i32,
+                    400,
+                    fg,
+                    0.95,
+                    cw - 10.0 * d,
                 );
-                &sel_c
-            } else {
-                content
-            };
-            if idx == self.sel {
-                self.rect(
-                    content,
-                    (cx - cw / 2.0 + 4.0 * d, cy0, cw - 8.0 * d, ch - 4.0 * d),
-                    14.0 * d,
-                    Color {
-                        A: 26,
-                        R: fg[0],
-                        G: fg[1],
-                        B: fg[2],
-                    },
-                );
+                self.hits
+                    .push(((cx - cw / 2.0, cy0, cw, ch), HitKind::Cell(idx)));
             }
-            if let Some(s) = self.icon_surface(&row.path, (icon * 1.6) as i32) {
-                self.sprite(content, &s, cx - icon / 2.0, cy0 + 8.0 * d, icon, icon, 1.0);
-            } else {
-                self.rect(
-                    content,
-                    (cx - icon / 2.0, cy0 + 8.0 * d, icon, icon),
-                    icon * 0.23,
-                    Color {
-                        A: 60,
-                        R: fg[0],
-                        G: fg[1],
-                        B: fg[2],
-                    },
-                );
-            }
-            let lw = self
-                .text_w(&row.title, (13.0 * d).round() as i32, 400)
-                .min(cw - 10.0 * d);
-            self.text(
-                content,
-                &row.title,
-                cx - lw / 2.0,
-                cy0 + 8.0 * d + icon + 14.0 * d,
-                (13.0 * d).round() as i32,
-                400,
-                fg,
-                0.95,
-                cw - 10.0 * d,
-            );
-            self.hits
-                .push(((cx - cw / 2.0, cy0, cw, ch), HitKind::Cell(idx)));
         }
+        self.content_h = 6.0 * d + rows_n as f32 * ch + 12.0 * d;
     }
 
     fn sel_box(
@@ -2146,7 +2153,10 @@ impl Spot {
         fg: [u8; 3],
     ) {
         let d = self.dpi;
+        self.view = (top, bottom);
+        self.cell_y.clear();
         if self.rows.is_empty() {
+            self.content_h = 0.0;
             if self.mode != Mode::Search {
                 let msg = match self.mode {
                     Mode::Clipboard => prefs::tr("Nothing copied in the last 8 hours."),
@@ -2171,26 +2181,37 @@ impl Spot {
             }
             return;
         }
-        let first = self.scroll.min(self.rows.len().saturating_sub(1));
+        let n = self.rows.len();
         let headers = self.headers.clone();
-        let mut ry = top + 4.0 * d;
-        for i in first..self.rows.len() {
-            if ry > bottom {
-                break;
-            }
+        let hdr_n = headers.iter().filter(|(at, _)| *at < n).count();
+        let content_h = 4.0 * d + n as f32 * row_h + hdr_n as f32 * 30.0 * d + 12.0 * d;
+        self.content_h = content_h;
+        let max_scroll = (content_h - (bottom - top)).max(0.0);
+        self.pscroll = self.pscroll.clamp(0.0, max_scroll);
+        let mut y = top + 4.0 * d;
+        for i in 0..n {
             if let Some((_, title)) = headers.iter().find(|(at, _)| *at == i) {
-                self.text(
-                    area,
-                    title,
-                    20.0 * d,
-                    ry + 15.0 * d,
-                    (13.0 * d).round() as i32,
-                    600,
-                    fg,
-                    0.6,
-                    w * 0.6,
-                );
-                ry += 30.0 * d;
+                let hy = y - self.pscroll;
+                if hy + 30.0 * d > top && hy < bottom {
+                    self.text(
+                        area,
+                        title,
+                        20.0 * d,
+                        hy + 15.0 * d,
+                        (13.0 * d).round() as i32,
+                        600,
+                        fg,
+                        0.6,
+                        w * 0.6,
+                    );
+                }
+                y += 30.0 * d;
+            }
+            let ry = y - self.pscroll;
+            self.cell_y.push((i, y, row_h));
+            if ry + row_h <= top || ry >= bottom {
+                y += row_h;
+                continue;
             }
             let row = self.rows[i].clone();
             let sel_c;
@@ -2359,7 +2380,7 @@ impl Spot {
                 self.hits.push((r, HitKind::CopyRow(i)));
             }
             self.hits.push(((0.0, ry, w, row_h), HitKind::Row(i)));
-            ry += row_h;
+            y += row_h;
         }
     }
 
@@ -2381,7 +2402,7 @@ impl Spot {
             return;
         }
         let empty_q = self.query.trim().is_empty();
-        if matches!(self.mode, Mode::Apps | Mode::Files) && empty_q {
+        if self.mode == Mode::Apps || (self.mode == Mode::Files && empty_q) {
             let vis: Vec<usize> = self.cell_y.iter().map(|c| c.0).collect();
             if vis.is_empty() {
                 return;
@@ -2389,38 +2410,28 @@ impl Spot {
             let pos = vis.iter().position(|&i| i == self.sel).unwrap_or(0) as i32;
             let np = (pos + dx + dy * COLS as i32).clamp(0, vis.len() as i32 - 1) as usize;
             self.sel = vis[np];
-            if let Some(&(_, y, h)) = self.cell_y.iter().find(|c| c.0 == self.sel) {
-                let (top, bottom) = self.view;
-                let yv = y - self.pscroll;
-                if yv < top {
-                    self.pscroll -= top - yv + 6.0 * self.dpi;
-                } else if yv + h > bottom {
-                    self.pscroll += yv + h - bottom + 6.0 * self.dpi;
-                }
-                self.pscroll = self
-                    .pscroll
-                    .clamp(0.0, (self.content_h - (bottom - top)).max(0.0));
-            }
-        } else if self.mode == Mode::Apps {
-            let cur = self.sel as i32;
-            let next = (cur + dx + dy * COLS as i32).clamp(0, n as i32 - 1) as usize;
-            self.sel = next;
-            let row = self.sel / COLS;
-            if row < self.scroll {
-                self.scroll = row;
-            } else if row >= self.scroll + GRID_ROWS {
-                self.scroll = row + 1 - GRID_ROWS;
-            }
         } else {
             let step = if dy != 0 { dy } else { dx };
             self.sel = ((self.sel as i32 + step).rem_euclid(n as i32)) as usize;
-            if self.sel < self.scroll {
-                self.scroll = self.sel;
-            } else if self.sel >= self.scroll + 8 {
-                self.scroll = self.sel + 1 - 8;
-            }
         }
+        self.scroll_sel_into_view();
         self.render();
+    }
+
+    fn scroll_sel_into_view(&mut self) {
+        let Some(&(_, y, h)) = self.cell_y.iter().find(|c| c.0 == self.sel) else {
+            return;
+        };
+        let (top, bottom) = self.view;
+        let yv = y - self.pscroll;
+        if yv < top {
+            self.pscroll -= top - yv + 6.0 * self.dpi;
+        } else if yv + h > bottom {
+            self.pscroll += yv + h - bottom + 6.0 * self.dpi;
+        }
+        self.pscroll = self
+            .pscroll
+            .clamp(0.0, (self.content_h - (bottom - top)).max(0.0));
     }
 
     fn start_edit_key(&mut self) {
@@ -2533,9 +2544,10 @@ unsafe extern "system" fn ctl_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
         WM_THUMBS => {
             with_spot(|s| {
                 if s.mode == Mode::Files && s.query.trim().is_empty() && !s.morphing {
-                    let sel = s.sel;
+                    let (sel, ps) = (s.sel, s.pscroll);
                     s.rebuild_rows();
                     s.sel = sel.min(s.rows.len().saturating_sub(1));
+                    s.pscroll = ps;
                     s.render();
                 }
             });
@@ -2727,25 +2739,12 @@ unsafe extern "system" fn spot_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
         WM_MOUSEWHEEL => {
             let delta = (wp.0 >> 16) as i16;
             with_spot(|s| {
-                if matches!(s.mode, Mode::Apps | Mode::Files) && s.query.trim().is_empty() {
-                    let max = (s.content_h - (s.view.1 - s.view.0)).max(0.0);
-                    s.pscroll =
-                        (s.pscroll + if delta < 0 { 72.0 } else { -72.0 } * s.dpi).clamp(0.0, max);
-                    s.render();
+                if s.compact() {
                     return;
                 }
-                let step = if s.mode == Mode::Apps { 1 } else { 2 };
-                let per = if s.mode == Mode::Apps { COLS } else { 1 };
-                let max_scroll = if s.mode == Mode::Apps {
-                    s.rows.len().div_ceil(per).saturating_sub(GRID_ROWS)
-                } else {
-                    s.rows.len().saturating_sub(8)
-                };
-                s.scroll = if delta < 0 {
-                    (s.scroll + step).min(max_scroll)
-                } else {
-                    s.scroll.saturating_sub(step)
-                };
+                let max = (s.content_h - (s.view.1 - s.view.0)).max(0.0);
+                s.pscroll =
+                    (s.pscroll + if delta < 0 { 72.0 } else { -72.0 } * s.dpi).clamp(0.0, max);
                 s.render();
             });
             LRESULT(0)
