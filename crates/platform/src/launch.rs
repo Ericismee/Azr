@@ -116,18 +116,24 @@ pub fn toggle_start(was_open_at_press: bool) {
 
 pub fn reveal_task_manager() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{
-        IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindowAsync, SW_RESTORE, SW_SHOW,
+        IsIconic, IsWindowVisible, ShowWindowAsync, SW_RESTORE,
     };
     unsafe {
         let Ok(window) = FindWindowW(w!("TaskManagerWindow"), None) else {
             return false;
         };
-        if IsIconic(window).as_bool() {
-            let _ = ShowWindowAsync(window, SW_RESTORE);
-        } else if !IsWindowVisible(window).as_bool() {
-            let _ = ShowWindowAsync(window, SW_SHOW);
+        let minimized = IsIconic(window).as_bool();
+        if !minimized && !IsWindowVisible(window).as_bool() {
+            return false;
         }
-        SetForegroundWindow(window).as_bool()
+        if minimized {
+            let _ = ShowWindowAsync(window, SW_RESTORE);
+        }
+        // The window exists: report success even when foreground activation is
+        // refused or the restore is still async. Otherwise callers launch a
+        // second Task Manager, leaving a stale window in the task switcher.
+        crate::wins::focus::force_foreground(window.0 as isize);
+        true
     }
 }
 
