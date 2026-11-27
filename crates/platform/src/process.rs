@@ -2,8 +2,8 @@ use windows::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0,
 };
 use windows::Win32::System::Threading::{
-    GetExitCodeProcess, OpenProcess, WaitForSingleObject, INFINITE,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    GetExitCodeProcess, OpenProcess, TerminateProcess, WaitForSingleObject, INFINITE,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -41,6 +41,19 @@ pub fn is_alive(pid: u32) -> bool {
                 ok && code == STILL_ACTIVE
             }
             Err(_) => GetLastError() != ERROR_INVALID_PARAMETER,
+        }
+    }
+}
+
+pub fn terminate(pid: u32) -> bool {
+    unsafe {
+        match OpenProcess(PROCESS_TERMINATE, false, pid) {
+            Ok(h) => {
+                let ok = TerminateProcess(h, 1).is_ok();
+                let _ = CloseHandle(h);
+                ok
+            }
+            Err(_) => false,
         }
     }
 }

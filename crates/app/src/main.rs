@@ -30,6 +30,7 @@ mod stage;
 mod strip;
 mod switcher;
 mod topmost;
+mod trayapps;
 mod updates;
 mod widgets;
 
@@ -184,6 +185,9 @@ fn main() {
 
     let first_launch = prefs::init();
     let pref = prefs::get();
+    if pref.menubar_tray {
+        crate::trayapps::list();
+    }
     let host = match azr_ui::host::Host::new() {
         Ok(h) => h,
         Err(e) => {

@@ -48,6 +48,9 @@ const WIFI: u32 = 13;
 const BATT: u32 = 14;
 const STAGEI: u32 = 15;
 const DESKTOP: u32 = 16;
+const TRAY: u32 = 17;
+const TRAY_CMD: usize = 90_000;
+const TRAY_QUIT: usize = 91_000;
 const NATIVE0: u32 = 50;
 const NATIVE_CMD: usize = 100_000;
 
@@ -81,6 +84,7 @@ struct Bar {
     native: Vec<azr_platform::menus::Top>,
     native_hwnd: isize,
     fullscreen: bool,
+    tray_list: Vec<azr_platform::tray::TrayApp>,
 }
 
 struct Ctl {
@@ -379,6 +383,7 @@ fn create(comp: &Compositor) -> windows_core::Result<Box<Bar>> {
         native: vec![],
         native_hwnd: 0,
         fullscreen: false,
+        tray_list: vec![],
     });
     bar.apply_bg();
     Ok(bar)
@@ -704,6 +709,12 @@ impl Bar {
             id: CLOCK,
             width: t(&self.clock_text(), BAR_W),
         });
+        if prefs::get().menubar_tray {
+            right.push(LItem {
+                id: TRAY,
+                width: icon_w,
+            });
+        }
         right.push(LItem {
             id: CTRL,
             width: icon_w,
@@ -869,36 +880,41 @@ impl Bar {
         );
     }
 
-    fn draw_glyph(&mut self, glyph: &str, cx: f32, size: f32, op: f32) {
-        let px = (size * self.dpi).round() as i32;
+    fn draw_sym(&mut self, sym: azr_core::symbols::Sym, cx: f32, size: f32, op: f32) {
+        let n = (size * 1.25 * self.dpi).round().max(8.0) as u32;
         let rgb = self.fg();
+        let key = format!("sym|{sym:?}|{n}|{rgb:?}");
+        let (surf, w, h) = match self.cache.get(&key).cloned() {
+            Some(v) => v,
+            None => {
+                let data = azr_core::symbols::render(sym, n, rgb);
+                let Ok(s) = self.gfx.surface_from_bgra(n, n, &data) else {
+                    return;
+                };
+                let v = (s, n as i32, n as i32);
+                self.cache.insert(key, v.clone());
+                v
+            }
+        };
+        let layer = self.layer.clone();
+        self.sprite(
+            &layer,
+            &surf,
+            (cx - w as f32 / 2.0).round(),
+            ((self.h as f32 - h as f32) / 2.0).round(),
+            w as f32,
+            h as f32,
+            op,
+        );
+    }
+
+    fn draw_glyph(&mut self, glyph: &str, cx: f32, size: f32, op: f32) {
         if let Some(sym) = azr_core::symbols::for_glyph(glyph) {
-            let n = (size * 1.25 * self.dpi).round().max(8.0) as u32;
-            let key = format!("sym|{sym:?}|{n}|{rgb:?}");
-            let (surf, w, h) = match self.cache.get(&key).cloned() {
-                Some(v) => v,
-                None => {
-                    let data = azr_core::symbols::render(sym, n, rgb);
-                    let Ok(s) = self.gfx.surface_from_bgra(n, n, &data) else {
-                        return;
-                    };
-                    let v = (s, n as i32, n as i32);
-                    self.cache.insert(key, v.clone());
-                    v
-                }
-            };
-            let layer = self.layer.clone();
-            self.sprite(
-                &layer,
-                &surf,
-                (cx - w as f32 / 2.0).round(),
-                ((self.h as f32 - h as f32) / 2.0).round(),
-                w as f32,
-                h as f32,
-                op,
-            );
+            self.draw_sym(sym, cx, size, op);
             return;
         }
+        let px = (size * self.dpi).round() as i32;
+        let rgb = self.fg();
         let key = format!("g|{px}|{rgb:?}|{glyph}");
         let hit = self.cache.get(&key).cloned();
         let (surf, w, h) = match hit {
@@ -1212,6 +1228,7 @@ impl Bar {
             match p.id {
                 CLOCK => self.draw_text(&clock, BAR_W, p.x, p.w, 1.0),
                 DESKTOP => self.draw_glyph("\u{E7F4}", cx, 13.0, 0.95),
+                TRAY => self.draw_sym(azr_core::symbols::Sym::Tray, cx, 13.0, 0.95),
                 CTRL => self.draw_glyph("\u{E9E9}", cx, 13.0, 0.95),
                 SEARCH => self.draw_glyph("\u{E721}", cx, 13.0, 0.95),
                 STAGEI => self.draw_glyph("\u{E8A0}", cx, 13.0, 0.95),
@@ -1504,8 +1521,10 @@ impl Bar {
     }
 
     fn has_menu(id: u32) -> bool {
-        matches!(id, LOGO | APP | M_FILE | M_EDIT | M_VIEW | M_WIN | M_HELP)
-            || (NATIVE0..NATIVE0 + 20).contains(&id)
+        matches!(
+            id,
+            LOGO | APP | M_FILE | M_EDIT | M_VIEW | M_WIN | M_HELP | TRAY
+        ) || (NATIVE0..NATIVE0 + 20).contains(&id)
     }
 
     fn open_menu(&mut self, id: u32) {
@@ -1520,6 +1539,9 @@ impl Bar {
                 .iter()
                 .find(|w| w.hwnd == hwnd)
                 .map(|w| (w.hwnd, window_pid(w.hwnd)));
+        }
+        if id == TRAY {
+            self.tray_list = crate::trayapps::list();
         }
         let items = self.menu_items(id);
         log::line("menubar", &format!("buka menu {id}: {} item", items.len()));
@@ -1738,6 +1760,30 @@ impl Bar {
                 a(303, &prefs::tr("Close Window")).with_accel("Alt+F4"),
             ],
             M_HELP => vec![a(700, &prefs::tr("Azr Help and Feedback"))],
+            TRAY => {
+                let mut items = vec![Item::heading(&prefs::tr("Tray apps"))];
+                if self.tray_list.is_empty() {
+                    items.push(Item::action(0, &prefs::tr("No tray apps"), false));
+                } else {
+                    for (i, app) in self.tray_list.iter().enumerate() {
+                        let label = format!("{} {}", prefs::tr("Open"), app.name);
+                        items.push(
+                            Item::action(TRAY_CMD + i, &label, true)
+                                .with_sym(Some(azr_core::symbols::Sym::Play)),
+                        );
+                    }
+                    items.push(Item::separator());
+                    items.push(Item::heading(&prefs::tr("Quit")));
+                    for (i, app) in self.tray_list.iter().enumerate() {
+                        let label = format!("{} {}", prefs::tr("Quit"), app.name);
+                        items.push(
+                            Item::action(TRAY_QUIT + i, &label, true)
+                                .with_sym(Some(azr_core::symbols::Sym::XCircle)),
+                        );
+                    }
+                }
+                items
+            }
             _ => vec![],
         }
     }
@@ -1778,6 +1824,18 @@ impl Bar {
     fn pick(&mut self, cmd: usize) {
         let target = self.menu_target;
         self.close_menu();
+        if (TRAY_CMD..TRAY_CMD + 256).contains(&cmd) {
+            if let Some(app) = self.tray_list.get(cmd - TRAY_CMD) {
+                crate::trayapps::open(app);
+            }
+            return;
+        }
+        if (TRAY_QUIT..TRAY_QUIT + 256).contains(&cmd) {
+            if let Some(app) = self.tray_list.get(cmd - TRAY_QUIT) {
+                crate::trayapps::quit(app);
+            }
+            return;
+        }
         if matches!(cmd, 201 | 202 | 204 | 300..=699) || cmd >= NATIVE_CMD {
             let Some((hwnd, _)) = target.filter(|(h, pid)| *pid != 0 && window_pid(*h) == *pid)
             else {

@@ -1,14 +1,14 @@
 use azr_core::dock::items::Win;
 use std::ffi::c_void;
 use windows::core::BOOL;
-use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowTextW,
-    GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GW_OWNER, WS_EX_APPWINDOW,
+    EnumWindows, GetClassNameW, GetWindow, GetWindowLongW, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, GWL_EXSTYLE, GW_OWNER, WS_EX_APPWINDOW,
     WS_EX_TOOLWINDOW,
 };
 
@@ -168,6 +168,94 @@ unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
 pub fn list(own_pid: u32) -> Vec<Win> {
     let mut ctx = Ctx {
         own_pid,
+        out: Vec::new(),
+    };
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut ctx as *mut Ctx as isize));
+    }
+    ctx.out
+}
+
+/// Best candidate for an app's real window: titled, uncloaked, not an IME or
+/// helper window. Prefers a visible window over a hidden one, then the largest.
+pub fn main_window_of(pid: u32) -> Option<isize> {
+    struct Ctx {
+        pid: u32,
+        best: Option<(isize, bool, i32)>,
+    }
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let ctx = &mut *(lparam.0 as *mut Ctx);
+        let mut p = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut p));
+        if p != ctx.pid {
+            return BOOL(1);
+        }
+        let class = class_of(hwnd);
+        if matches!(
+            class.as_str(),
+            "IME"
+                | "MSCTFIME UI"
+                | "OleDdeWndClass"
+                | "Base_PowerMessageWindow"
+                | "Electron_NotifyIconHostWindow"
+                | "crashpad_SessionEndWatcher"
+                | "DiscordDesktopOverlayInputTrap"
+                | "CNEventWindowClass"
+                | "GDI+ Hook Window Class"
+                | "Chrome_SystemMessageWindow"
+        ) || class.starts_with("HwndWrapper[")
+            || class.starts_with(".NET-BroadcastEventWindow")
+            || class.ends_with("ScreenChangeObserverWindow")
+        {
+            return BOOL(1);
+        }
+        let title = text_of(hwnd);
+        let lower = title.to_lowercase();
+        if title.is_empty()
+            || lower.starts_with("amd:")
+            || lower.starts_with("gdi+ window")
+            || lower.contains("notificationwindow")
+            || lower.contains("system tray")
+            || lower.starts_with("c:\\")
+            || lower.starts_with("d:\\")
+        {
+            return BOOL(1);
+        }
+        let mut r = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut r);
+        let area = (r.right - r.left) * (r.bottom - r.top);
+        let visible = IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool();
+        if ctx
+            .best
+            .map_or(true, |(_, sv, sa)| (visible, area) > (sv, sa))
+        {
+            ctx.best = Some((hwnd.0 as isize, visible, area));
+        }
+        BOOL(1)
+    }
+    let mut ctx = Ctx { pid, best: None };
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut ctx as *mut Ctx as isize));
+    }
+    ctx.best.map(|(h, _, _)| h)
+}
+
+pub fn windows_of(pid: u32) -> Vec<isize> {
+    struct Ctx {
+        pid: u32,
+        out: Vec<isize>,
+    }
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let ctx = &mut *(lparam.0 as *mut Ctx);
+        let mut p = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut p));
+        if p == ctx.pid {
+            ctx.out.push(hwnd.0 as isize);
+        }
+        BOOL(1)
+    }
+    let mut ctx = Ctx {
+        pid,
         out: Vec::new(),
     };
     unsafe {
