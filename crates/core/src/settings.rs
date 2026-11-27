@@ -317,6 +317,7 @@ pub struct Settings {
     pub menubar_glass: bool,
     pub menubar_material: bool,
     pub menubar_style: BarStyle,
+    pub menubar_desktop: bool,
     pub hot: [HotAction; 4],
     pub stage: bool,
     pub switcher: bool,
@@ -399,6 +400,7 @@ impl Default for Settings {
             menubar_glass: false,
             menubar_material: true,
             menubar_style: BarStyle::Dark,
+            menubar_desktop: false,
             hot: [HotAction::None; 4],
             stage: false,
             switcher: true,
@@ -790,6 +792,11 @@ impl Settings {
                         s.menubar_style = BarStyle::parse(v).unwrap_or(s.menubar_style);
                     }
                 }
+                "menubar_desktop" => {
+                    if let Some(b) = parse_bool(v) {
+                        s.menubar_desktop = b;
+                    }
+                }
                 "menubar_material" => {
                     if let Some(b) = parse_bool(v) {
                         s.menubar_material = b;
@@ -942,8 +949,8 @@ impl Settings {
             self.icon_background
         ));
         text.push_str(&format!(
-            "menu_logo={}\noverview_alt_tab={}\n",
-            self.menu_logo, self.overview_alt_tab
+            "menu_logo={}\noverview_alt_tab={}\nmenubar_desktop={}\n",
+            self.menu_logo, self.overview_alt_tab, self.menubar_desktop
         ));
         text.push_str(&format!(
             "launchpad_key={}\nlaunchpad_icon={}\n",

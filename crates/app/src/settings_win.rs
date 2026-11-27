@@ -186,6 +186,7 @@ enum Action {
     DockOn,
     MenuBarOn,
     Clock24,
+    DesktopButton,
     BarStyle(u8),
     HotCycle(usize),
     HotAction(usize, azr_core::settings::HotAction),
@@ -2143,6 +2144,11 @@ impl Win {
                                 s.clock_24h,
                                 Action::Clock24,
                             ),
+                            RowDef::Toggle(
+                                prefs::tr("Show Desktop button"),
+                                s.menubar_desktop,
+                                Action::DesktopButton,
+                            ),
                             RowDef::Segments(
                                 prefs::tr("Battery percentage"),
                                 vec![
@@ -3606,6 +3612,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     }
                 }),
                 Some(Action::Clock24) => prefs::update(|s| s.clock_24h = !s.clock_24h),
+                Some(Action::DesktopButton) => {
+                    prefs::update(|s| s.menubar_desktop = !s.menubar_desktop)
+                }
                 Some(Action::DockOn) => prefs::update(|s| s.dock_enabled = !s.dock_enabled),
                 Some(Action::NotchOn) => prefs::update(|s| s.notch_enabled = !s.notch_enabled),
                 Some(Action::Refraction) => prefs::update(|s| s.refraction = !s.refraction),

@@ -2484,7 +2484,7 @@ fn run_action(id: &str) {
         "email" => launch::open("mailto:"),
         "screenshot" => keys::chord(&[keys::WIN, keys::SHIFT, 0x53]),
         "lock" => launch::run("rundll32.exe", "user32.dll,LockWorkStation"),
-        "desktop" => keys::chord(&[keys::WIN, 0x44]),
+        "desktop" => crate::showdesktop::toggle(),
         "dark" => prefs::update(|s| {
             s.theme = if s.theme == azr_core::settings::Theme::Dark {
                 azr_core::settings::Theme::Light

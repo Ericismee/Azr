@@ -130,6 +130,7 @@ const VI: &[(&str, &str)] = &[
     ("Bottom right", "Dưới phải"),
     ("None", "Không có"),
     ("Show Desktop", "Hiện màn hình nền"),
+    ("Show Desktop button", "Nút hiện màn hình nền"),
     ("Window manager", "Quản lý cửa sổ"),
     ("Notification Center", "Trung tâm thông báo"),
     ("Enable window manager", "Bật quản lý cửa sổ"),

@@ -47,6 +47,7 @@ const SEARCH: u32 = 12;
 const WIFI: u32 = 13;
 const BATT: u32 = 14;
 const STAGEI: u32 = 15;
+const DESKTOP: u32 = 16;
 const NATIVE0: u32 = 50;
 const NATIVE_CMD: usize = 100_000;
 
@@ -692,20 +693,25 @@ impl Bar {
             }
         }
         let icon_w = 30.0 * d;
-        let mut right = vec![
-            LItem {
-                id: CLOCK,
-                width: t(&self.clock_text(), BAR_W),
-            },
-            LItem {
-                id: CTRL,
+        let mut right = Vec::new();
+        if prefs::get().menubar_desktop {
+            right.push(LItem {
+                id: DESKTOP,
                 width: icon_w,
-            },
-            LItem {
-                id: SEARCH,
-                width: icon_w,
-            },
-        ];
+            });
+        }
+        right.push(LItem {
+            id: CLOCK,
+            width: t(&self.clock_text(), BAR_W),
+        });
+        right.push(LItem {
+            id: CTRL,
+            width: icon_w,
+        });
+        right.push(LItem {
+            id: SEARCH,
+            width: icon_w,
+        });
         if prefs::get().stage {
             right.push(LItem {
                 id: STAGEI,
@@ -1205,6 +1211,7 @@ impl Bar {
             let cx = p.x + p.w / 2.0;
             match p.id {
                 CLOCK => self.draw_text(&clock, BAR_W, p.x, p.w, 1.0),
+                DESKTOP => self.draw_glyph("\u{E7F4}", cx, 13.0, 0.95),
                 CTRL => self.draw_glyph("\u{E9E9}", cx, 13.0, 0.95),
                 SEARCH => self.draw_glyph("\u{E721}", cx, 13.0, 0.95),
                 STAGEI => self.draw_glyph("\u{E8A0}", cx, 13.0, 0.95),
@@ -1762,6 +1769,7 @@ impl Bar {
                 }
             }
             BATT => launch::open("ms-settings:batterysaver"),
+            DESKTOP => crate::showdesktop::toggle(),
             CLOCK => keys::chord(&[keys::WIN, 0x4E]),
             _ => {}
         }

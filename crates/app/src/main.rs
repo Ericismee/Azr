@@ -23,6 +23,7 @@ mod prefs;
 mod services;
 mod settings_win;
 mod shortcuts;
+mod showdesktop;
 mod single_instance;
 mod spotlight;
 mod stage;
