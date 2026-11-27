@@ -25,6 +25,8 @@ pub struct Item {
     pub separator: bool,
     pub accel: String,
     pub sym: Option<azr_core::symbols::Sym>,
+    pub icon: Option<azr_platform::icons::Bitmap>,
+    pub right_action: Option<usize>,
     pub toggle: Option<bool>,
     pub heading: bool,
     pub title: bool,
@@ -42,6 +44,8 @@ impl Item {
             separator: false,
             accel: String::new(),
             sym: None,
+            icon: None,
+            right_action: None,
             toggle: None,
             heading: false,
             title: false,
@@ -84,6 +88,14 @@ impl Item {
     }
     pub fn with_sym(mut self, s: Option<azr_core::symbols::Sym>) -> Item {
         self.sym = s;
+        self
+    }
+    pub fn with_icon(mut self, icon: Option<azr_platform::icons::Bitmap>) -> Item {
+        self.icon = icon;
+        self
+    }
+    pub fn with_right_action(mut self, id: usize) -> Item {
+        self.right_action = Some(id);
         self
     }
     pub fn with_accel(mut self, a: &str) -> Item {
@@ -276,12 +288,14 @@ unsafe extern "system" fn proc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT
             let (x, y) = xy(l);
             let picked = LIVE.with(|c| {
                 c.borrow().get(&key).and_then(|live| {
-                    row_at(live, x, y).map(|i| {
-                        (
-                            live.target,
-                            live.rows[i].2.id,
-                            live.rows[i].2.keep_open || live.owner_hides,
-                        )
+                    row_at(live, x, y).and_then(|i| {
+                        let item = &live.rows[i].2;
+                        let id = if m == WM_RBUTTONUP {
+                            item.right_action?
+                        } else {
+                            item.id
+                        };
+                        Some((live.target, id, item.keep_open || live.owner_hides))
                     })
                 })
             });
@@ -395,7 +409,7 @@ impl Menu {
         top: i32,
         right_aligned: bool,
     ) -> Result<()> {
-        self.show_impl(comp, gfx, items, x, top, false, right_aligned, None)
+        self.show_impl(comp, gfx, items, x, top, false, right_aligned, None, None)
     }
 
     pub fn hide_animated(&mut self, comp: &Compositor) {
@@ -442,7 +456,7 @@ impl Menu {
         x: i32,
         y: i32,
     ) -> Result<()> {
-        self.show_impl(comp, gfx, items, x, y, true, false, None)
+        self.show_impl(comp, gfx, items, x, y, true, false, None, None)
     }
 
     pub fn show_below(
@@ -453,7 +467,19 @@ impl Menu {
         x: i32,
         top: i32,
     ) -> Result<()> {
-        self.show_impl(comp, gfx, items, x, top, false, false, None)
+        self.show_impl(comp, gfx, items, x, top, false, false, None, None)
+    }
+
+    pub fn show_compact_below(
+        &mut self,
+        comp: &Compositor,
+        gfx: &Gfx,
+        items: Vec<Item>,
+        x: i32,
+        top: i32,
+        card: Card,
+    ) -> Result<()> {
+        self.show_impl(comp, gfx, items, x, top, false, false, None, Some(card))
     }
 
     pub fn dpi(&self) -> f32 {
@@ -478,6 +504,7 @@ impl Menu {
             false,
             false,
             Some(above_edge),
+            None,
         )
     }
 
@@ -508,6 +535,7 @@ impl Menu {
         above: bool,
         right_aligned: bool,
         above_edge: Option<i32>,
+        card_override: Option<Card>,
     ) -> Result<()> {
         let key = self.popup.hwnd.0 as isize;
         let d = self.dpi;
@@ -519,7 +547,8 @@ impl Menu {
             self.popup.hide();
         }
         let refresh = self.popup.is_visible();
-        let card = self.card;
+        let card = card_override.or(self.card);
+        let compact = card_override.is_some();
         let radius = card.map_or(13.0, |c| c.radius) * d;
         let look = crate::prefs::look(crate::prefs::Role::Themed);
         let base = GlassParams::dark((10.0, 10.0), radius);
@@ -533,12 +562,16 @@ impl Menu {
             [24, 24, 28]
         };
         let pad = card.map_or(6.0, |c| c.pad) * d;
-        let (row_h, sep_h, text_px) = (24.0 * d, 11.0 * d, (14.0 * d).round() as i32);
+        let (row_h, sep_h, text_px) = if compact {
+            (20.0 * d, 8.0 * d, (12.0 * d).round() as i32)
+        } else {
+            (24.0 * d, 11.0 * d, (14.0 * d).round() as i32)
+        };
         let style = Style {
             px: text_px,
             weight: 400,
         };
-        let head_px = (12.0 * d).round() as i32;
+        let head_px = (if compact { 11.0 } else { 12.0 } * d).round() as i32;
         let style_of = |it: &Item| Style {
             px: if it.heading { head_px } else { text_px },
             weight: if it.title {
@@ -549,7 +582,7 @@ impl Menu {
                 400
             },
         };
-        let has_sym = items.iter().any(|i| i.sym.is_some());
+        let has_sym = items.iter().any(|i| i.sym.is_some() || i.icon.is_some());
         let sym_w = if has_sym { 24.0 * d } else { 0.0 };
         let lead_d = 26.0 * d;
         let sw = (32.0 * d, 19.0 * d);
@@ -591,7 +624,7 @@ impl Menu {
             } else if it.lead.is_some() {
                 lead_d + 8.0 * d
             } else if it.heading {
-                26.0 * d
+                (if compact { 22.0 } else { 26.0 }) * d
             } else {
                 row_h
             };
@@ -680,7 +713,25 @@ impl Menu {
                 })?;
                 rb.Children()?.InsertAtTop(&s)?;
             }
-            if let Some(sym) = it.sym {
+            if let Some(icon) = &it.icon {
+                let size = (18.0 * d).round().max(1.0);
+                if let Ok(surface) = gfx.surface_from_bgra(icon.w, icon.h, &icon.bgra) {
+                    if let Ok(brush) = comp.CreateSurfaceBrushWithSurface(&surface) {
+                        let _ = brush.SetStretch(CompositionStretch::Uniform);
+                        if let Ok(s) = comp.CreateSpriteVisual() {
+                            let _ = s.SetBrush(&brush);
+                            let _ = s.SetSize(Vector2 { X: size, Y: size });
+                            let _ = s.SetOffset(Vector3 {
+                                X: pad + 12.0 * d,
+                                Y: ry + (rh - size) / 2.0,
+                                Z: 0.0,
+                            });
+                            let _ = s.SetOpacity(if it.enabled { 1.0 } else { 0.38 });
+                            let _ = rb.Children()?.InsertAtTop(&s);
+                        }
+                    }
+                }
+            } else if let Some(sym) = it.sym {
                 let n = (15.0 * d).round() as u32;
                 let s = symbol(sym, n, ink)?;
                 s.SetOffset(Vector3 {

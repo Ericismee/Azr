@@ -23,12 +23,14 @@ mod prefs;
 mod services;
 mod settings_win;
 mod shortcuts;
+mod showdesktop;
 mod single_instance;
 mod spotlight;
 mod stage;
 mod strip;
 mod switcher;
 mod topmost;
+mod trayapps;
 mod updates;
 mod widgets;
 

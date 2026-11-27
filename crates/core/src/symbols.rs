@@ -40,6 +40,7 @@ pub enum Sym {
     Wifi2,
     ChevronRight,
     ChevronDown,
+    ChevronUp,
     Headphones,
     Keyboard,
     Mouse,
@@ -204,6 +205,10 @@ fn shape(sym: Sym, p: P) -> bool {
             line(p, (0.22, 0.38), (0.5, 0.64), 0.1) <= 0.0
                 || line(p, (0.5, 0.64), (0.78, 0.38), 0.1) <= 0.0
         }
+        Sym::ChevronUp => {
+            line(p, (0.22, 0.62), (0.5, 0.36), 0.1) <= 0.0
+                || line(p, (0.5, 0.36), (0.78, 0.62), 0.1) <= 0.0
+        }
         Sym::Headphones => {
             let band = arc(p, (0.5, 0.56), 0.34, 0.085, 1.5708) <= 0.0 && p.1 <= 0.58;
             let cups = rrect(p, (0.21, 0.70), (0.09, 0.17), 0.07) <= 0.0
@@ -353,18 +358,11 @@ fn shape(sym: Sym, p: P) -> bool {
             frame || header || rings
         }
         Sym::Tray => {
-            let w = 0.085;
-            line(p, (0.14, 0.52), (0.14, 0.80), w) <= 0.0
-                || line(p, (0.14, 0.80), (0.86, 0.80), w) <= 0.0
-                || line(p, (0.86, 0.80), (0.86, 0.52), w) <= 0.0
-                || line(p, (0.14, 0.52), (0.36, 0.52), w) <= 0.0
-                || line(p, (0.36, 0.52), (0.42, 0.62), w) <= 0.0
-                || line(p, (0.42, 0.62), (0.58, 0.62), w) <= 0.0
-                || line(p, (0.58, 0.62), (0.64, 0.52), w) <= 0.0
-                || line(p, (0.64, 0.52), (0.86, 0.52), w) <= 0.0
-                || line(p, (0.5, 0.16), (0.5, 0.44), w) <= 0.0
-                || line(p, (0.38, 0.33), (0.5, 0.44), w) <= 0.0
-                || line(p, (0.62, 0.33), (0.5, 0.44), w) <= 0.0
+            let panel = rrect(p, (0.5, 0.54), (0.72, 0.64), 0.12).abs() - 0.055 <= 0.0;
+            let icons = [(0.34, 0.40), (0.58, 0.40), (0.34, 0.64), (0.58, 0.64)]
+                .iter()
+                .any(|c| rrect(p, *c, (0.12, 0.12), 0.035) <= 0.0);
+            panel || icons
         }
         Sym::Folder => {
             let body = rrect(p, (0.5, 0.58), (0.38, 0.24), 0.07).abs() - 0.045 <= 0.0;
@@ -526,6 +524,7 @@ mod tests {
             Sym::Wifi2,
             Sym::ChevronRight,
             Sym::ChevronDown,
+            Sym::ChevronUp,
             Sym::Headphones,
             Sym::Keyboard,
             Sym::Mouse,
