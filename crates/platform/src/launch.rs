@@ -1,5 +1,8 @@
-use windows::core::{w, HSTRING, PCWSTR};
-use windows::Win32::Foundation::{LPARAM, WPARAM};
+use windows::core::{w, HSTRING, PCWSTR, PWSTR};
+use windows::Win32::Foundation::{CloseHandle, LPARAM, WPARAM};
+use windows::Win32::System::Threading::{
+    CreateProcessW, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOW,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_ESCAPE,
 };
@@ -147,9 +150,47 @@ pub fn task_manager() {
     if reveal_task_manager() {
         crate::log::line("launch", "Task Manager window activated");
     } else {
-        crate::log::line("launch", "Task Manager requested from Windows");
-        run("taskmgr.exe", "");
+        crate::log::line("launch", "Task Manager started without elevation");
+        create_process("taskmgr.exe");
     }
+}
+
+/// ShellExecute honors taskmgr.exe's `autoElevate` manifest, which makes it a
+/// higher-integrity process that Azr cannot activate or Alt+Tab into.
+/// CreateProcess keeps the child at the caller's integrity level.
+fn create_process(file: &str) -> bool {
+    let path = system_tool(file);
+    let app = HSTRING::from(path.as_str());
+    let mut command: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut startup = STARTUPINFOW {
+        cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+        ..Default::default()
+    };
+    let mut info = PROCESS_INFORMATION::default();
+    let ok = unsafe {
+        CreateProcessW(
+            PCWSTR(app.as_ptr()),
+            Some(PWSTR(command.as_mut_ptr())),
+            None,
+            None,
+            false,
+            PROCESS_CREATION_FLAGS(0),
+            None,
+            PCWSTR::null(),
+            &mut startup,
+            &mut info,
+        )
+        .is_ok()
+    };
+    if ok {
+        unsafe {
+            let _ = CloseHandle(info.hThread);
+            let _ = CloseHandle(info.hProcess);
+        }
+    } else {
+        crate::log::line("launch", &format!("CreateProcess failed for {path}"));
+    }
+    ok
 }
 
 pub fn run(file: &str, params: &str) {
