@@ -23,19 +23,21 @@ mod prefs;
 mod services;
 mod settings_win;
 mod shortcuts;
+mod showdesktop;
 mod single_instance;
 mod spotlight;
 mod stage;
 mod strip;
 mod switcher;
 mod topmost;
+mod trayapps;
 mod updates;
 mod widgets;
 
 use azr_core::visibility::policy::Mode;
 use azr_platform::{log, shell::taskbar};
 use azr_ui::glass::Tier;
-use windows::core::{w, BOOL};
+use windows::core::{w, BOOL, HSTRING, PCWSTR};
 use windows::Win32::Foundation::HINSTANCE;
 use windows::Win32::System::Console::{
     SetConsoleCtrlHandler, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
@@ -43,6 +45,9 @@ use windows::Win32::System::Console::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
+use windows::Win32::UI::Shell::{
+    IsUserAnAdmin, ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -137,6 +142,38 @@ impl Drop for ExitGuard {
     }
 }
 
+/// Relaunch through UAC so Azr can send input and close windows of elevated
+/// apps such as Task Manager.
+fn elevate_self() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let file = HSTRING::from(exe.to_string_lossy().as_ref());
+    let params: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|arg| {
+            let s = arg.to_string_lossy();
+            if s.contains([' ', '"']) {
+                format!("\"{}\"", s.replace('"', "\\\""))
+            } else {
+                s.to_string()
+            }
+        })
+        .collect();
+    let joined = params.join(" ");
+    let arguments = HSTRING::from(joined.as_str());
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        lpVerb: w!("runas"),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: PCWSTR(arguments.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+    unsafe { ShellExecuteExW(&mut info).is_ok() }
+}
+
 fn main() {
     let mut raw = std::env::args_os().skip(1);
     if raw.next().is_some_and(|arg| arg == "--taskbar-guard") {
@@ -145,6 +182,9 @@ fn main() {
                 azr_platform::shell::recovery::wait_and_restore(pid, std::path::Path::new(&marker));
             }
         }
+        return;
+    }
+    if !unsafe { IsUserAnAdmin().as_bool() } && elevate_self() {
         return;
     }
     let args = parse_args();
@@ -183,6 +223,9 @@ fn main() {
 
     let first_launch = prefs::init();
     let pref = prefs::get();
+    if pref.menubar_tray {
+        crate::trayapps::list();
+    }
     let host = match azr_ui::host::Host::new() {
         Ok(h) => h,
         Err(e) => {
